@@ -1,0 +1,3 @@
+test-flask/.env
+test-flask/serviceAccountKey.json
+.idea/*
