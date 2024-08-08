@@ -35,12 +35,12 @@ jobs:
       - name: Set environment variables
         run: |
           cd test-backend/test-flask
-          echo "DB_URI=$DB_URI" >> .env
-          echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" >> .env
-          echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> .env
-          echo "S3_BUCKET_NAME=$S3_BUCKET_NAME" >> .env
-          echo "S3_REGION_NAME=$S3_REGION_NAME" >> .env
-          echo "FIREBASE_BUCKET_ADDRESS=$FIREBASE_BUCKET_ADDRESS" >> .env
+          echo "DB_URI=${{env.DB_URI}}" >> .env
+          echo "AWS_ACCESS_KEY_ID=${{env.AWS_ACCESS_KEY_ID}}" >> .env
+          echo "AWS_SECRET_ACCESS_KEY=${{env.AWS_SECRET_ACCESS_KEY}}" >> .env
+          echo "S3_BUCKET_NAME=${{env.S3_BUCKET_NAME}}" >> .env
+          echo "S3_REGION_NAME=${{env.S3_REGION_NAME}}" >> .env
+          echo "FIREBASE_BUCKET_ADDRESS=${{env.FIREBASE_BUCKET_ADDRESS}}" >> .env
           cd ../../
 
       - name: Set serviceAccountKey JSON
@@ -68,16 +68,17 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: $AWS_ACCESS_KEY_ID
-          aws-secret-access-key: $AWS_SECRET_ACCESS_KEY
-          aws-region: ap-northeast-2
+          aws-access-key-id: ${{env.AWS_ACCESS_KEY_ID}}
+          aws-secret-access-key: ${{env.AWS_SECRET_ACCESS_KEY}}
+          aws-region: ${{env.S3_REGION_NAME}}
 
       - name: Upload to S3
-        run: aws s3 cp --region ap-northeast-2 deploy.zip s3://$S3_BUCKET_NAME/deploy.zip --source .
+        run: |
+          aws s3 cp --region $aws-region deploy.zip s3://${{env.S3_BUCKET_NAME}}/deploy.zip --source .
 
       - name: Deploy to CodeDeploy
         run: |
           aws deploy create-deployment \
-            --application-name $APPLICATION_NAME \
-            --deployment-group-name $DEPLOYMENT_GROUP \
-            --s3-location bucket=$S3_BUCKET_NAME,bundleType=zip,key=deploy.zip
+            --application-name ${{env.APPLICATION_NAME}} \
+            --deployment-group-name ${{env.DEPLOYMENT_GROUP}} \
+            --s3-location bucket=${{env.S3_BUCKET_NAME}},bundleType=zip,key=deploy.zip
