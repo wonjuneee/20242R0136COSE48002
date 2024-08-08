@@ -70,11 +70,11 @@ jobs:
         with:
           aws-access-key-id: ${{env.AWS_ACCESS_KEY_ID}}
           aws-secret-access-key: ${{env.AWS_SECRET_ACCESS_KEY}}
-          aws-region: ${{env.S3_REGION_NAME}}
+          aws-region: ap-northeast-2
 
       - name: Upload to S3
         run: |
-          aws s3 cp --region $aws-region deploy.zip s3://${{env.S3_BUCKET_NAME}}/deploy.zip --source .
+          aws s3 cp --region ap-northeast-2 deploy.zip s3://${{env.S3_BUCKET_NAME}}/deploy.zip --source .
 
       - name: Deploy to CodeDeploy
         run: |
