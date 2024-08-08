@@ -18,7 +18,9 @@ import { IoMdPersonAdd } from 'react-icons/io';
 import { getAuth } from 'firebase/auth';
 import { Box } from '@mui/material';
 import { Button, Tooltip, OverlayTrigger } from 'react-bootstrap';
-import { apiIP } from '../../config';
+import { userList } from '../../API/user/userList';
+import { userUpdate } from '../../API/user/userUpdate';
+import { userDelete } from '../../API/user/userDelete';
 
 function UserList() {
   const [registerShow, setRegisterShow] = useState(false);
@@ -55,16 +57,8 @@ function UserList() {
       }
 
       // If reauthentication is successful, proceed with the account deletion
-      const response = await fetch(
-        `http://${apiIP}/user/delete?userId=${userId}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
+      const response = await userDelete(userId);
+      console.log('res', response);
       if (response.ok) {
         // 삭제된 유저를 제외한 새로운 사용자 목록 업데이트
         setAllUsers((prevUsers) =>
@@ -100,14 +94,13 @@ function UserList() {
       신규 회원 등록
     </Tooltip>
   );
-  ////////////
 
   const columns = [
     { field: 'name', headerName: '이름', width: 100 },
     { field: 'userId', headerName: '아이디', width: 250 },
     {
       field: 'type',
-      headerName: '소속',
+      headerName: '권한',
       width: 200,
       renderCell: (params) => (
         <CustomEditCell
@@ -149,20 +142,36 @@ function UserList() {
     const fetchData = async () => {
       try {
         //유저 리스트 fetch
-        const usersListResponse = await fetch(`http://${apiIP}/user`);
+        const usersListResponse = await userList();
         const usersData = await usersListResponse.json();
-        setUsersData(usersData);
 
-        //유저 상세정보
-        const usersWithAdditionalData = [];
-        for (const userType in usersData) {
-          const users = usersData[userType];
-          const userDataResponse = await fetch(
-            `http://${apiIP}/user/get?userId=${users.userId}`
-          );
-          const userData = await userDataResponse.json();
-          usersWithAdditionalData.push({ ...userData, id: users.userId });
-        }
+        const transformType = (type) => {
+          switch (type) {
+            case 0:
+              return 'Normal';
+            case 1:
+              return 'Researcher';
+            case 2:
+              return 'Manager';
+            default:
+              return type;
+          }
+        };
+
+        const usersWithTransformedType = usersData.map((user) => ({
+          ...user,
+          type: transformType(user.type),
+        }));
+
+        setUsersData(usersWithTransformedType);
+
+        const usersWithAdditionalData = usersWithTransformedType.map(
+          (user) => ({
+            ...user,
+            id: user.userId,
+          })
+        );
+
         setAllUsers(usersWithAdditionalData);
 
         setIsLoading(false); // Set isLoading to false after fetching data
@@ -202,29 +211,23 @@ function UserList() {
     if (!userToUpdate || userToUpdate[field] === value) {
       return; // Return early if the value is not changed or the user is not found
     }
+    const req = {
+      userId: userToUpdate.userId,
+      createdAt: userToUpdate.createdAt,
+      updatedAt: userToUpdate.updatedAt, // Set the current date as updatedAt
+      loginAt: userToUpdate.loginAt,
+      password: userToUpdate.password,
+      name: userToUpdate.name,
+      company: userToUpdate.company,
+      jobTitle: userToUpdate.jobTitle,
+      homeAddr: userToUpdate.homeAddr,
+      alarm: userToUpdate.alarm,
+      type: value, // The new value for the "type" field
+    };
 
     try {
       // Send a POST request to update the user's information
-      const response = await fetch(`http://${apiIP}/user/update`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: userToUpdate.userId,
-          createdAt: userToUpdate.createdAt,
-          updatedAt: userToUpdate.updatedAt, // Set the current date as updatedAt
-          loginAt: userToUpdate.loginAt,
-          password: userToUpdate.password,
-          name: userToUpdate.name,
-          company: userToUpdate.company,
-          jobTitle: userToUpdate.jobTitle,
-          homeAddr: userToUpdate.homeAddr,
-          alarm: userToUpdate.alarm,
-          type: value, // The new value for the "type" field
-        }),
-      });
-      console.log(response);
+      const response = await userUpdate(req);
       if (response.ok) {
         // If the update was successful, update the user's information in the state
         setAllUsers((prevUsers) =>
@@ -260,7 +263,17 @@ function UserList() {
   };
 
   return (
-    <div>
+    <div
+      style={{
+        // alignContent: 'center',
+        overflow: 'auto',
+        width: '100%', //
+        marginTop: '100px',
+        paddingBottom: '100px',
+        marginLeft: `${(720 / 1920) * 100}vw`, //
+        // marginright: `${(380 / 1920) * 100}vw`, //
+      }}
+    >
       <Toolbar />
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <Typography
@@ -270,10 +283,10 @@ function UserList() {
           style={{
             color: '#151D48',
             fontFamily: 'Poppins',
-            fontSize: `${(36 / 1920) * 100}vw`,
+            fontSize: `30px`,
             fontStyle: 'normal',
             fontWeight: 600,
-            lineHeight: `${(36 / 1920) * 100 * 1.4}vw`,
+            // lineHeight: `${(36 / 1920) * 100 * 1.4}vw`,
           }}
         >
           User Management
@@ -291,9 +304,8 @@ function UserList() {
             style={{
               color: '#151D48',
               fontFamily: 'Poppins',
-              fontSize: `${(36 / 1920) * 100}vw`,
+              fontSize: `24px`,
               fontWeight: 600,
-              lineHeight: `${(36 / 1920) * 100 * 1.4}vw`,
             }}
           >
             신규 회원 등록
@@ -301,15 +313,23 @@ function UserList() {
           <UserRegister handleClose={handleRegisterClose} />
         </Modal.Body>
       </Modal>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          // maxWidth: `${(1470 / 1920) * 100}vw`,
+          maxWidth: '1040px',
+        }}
+      >
         <Box
           component="form"
           sx={{
             marginBottom: `${(16 / 1080) * 100}vh`,
-            paddingX: `${(16 / 1920) * 100}vw`,
-            paddingY: `${(12 / 1080) * 100}vh`,
-            width: `${(513 / 1920) * 100}vw`,
-            height: `${(60 / 1080) * 100}vh`,
+            paddingX: `8px`,
+            paddingY: `8px`,
+            width: '280px',
+            height: '50px',
+            // minHeight: '60px',
             backgroundColor: '#FFF',
           }}
         >
@@ -320,10 +340,10 @@ function UserList() {
             sx={{
               color: '#737791',
               fontFamily: 'Poppins',
-              fontSize: `${(20 / 1920) * 100}vw`,
+              fontSize: `18px`,
               fontStyle: 'normal',
               fontWeight: 500,
-              lineHeight: `${(20 / 1080) * 100}vh`,
+              // lineHeight: `${(20 / 1080) * 100}vh`,
             }}
           />
         </Box>
@@ -388,6 +408,7 @@ function UserList() {
             boxShadow: `${(0 / 1920) * 100}vw ${(4 / 1080) * 100}vh ${
               (20 / 1920) * 100
             }vw ${(0 / 1080) * 100}vh rgba(238, 238, 238, 0.50)`,
+            maxWidth: '1040px',
           }}
         />
       )}

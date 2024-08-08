@@ -1,10 +1,7 @@
-import 'dart:convert';
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:structure/components/custom_pop_up.dart';
 import 'package:structure/config/pallete.dart';
-import 'package:structure/dataSource/remote_data_source.dart';
 import 'package:structure/model/user_model.dart';
 import 'package:structure/config/labels.dart';
 
@@ -14,6 +11,7 @@ class ChangePasswordViewModel with ChangeNotifier {
 
   final formKey = GlobalKey<FormState>();
   bool isLoading = false;
+  bool isActivateButton = false;
 
   TextEditingController originPW = TextEditingController();
   TextEditingController newPW = TextEditingController();
@@ -71,7 +69,8 @@ class ChangePasswordViewModel with ChangeNotifier {
     // 비밀번호 유효성을 검사하는 정규식
     const pattern = Labels.pwdPattern;
     final regex = RegExp(pattern);
-
+    isActivateButton = true; //버튼 활성화
+    notifyListeners();
     return regex.hasMatch(password);
   }
 
@@ -103,34 +102,24 @@ class ChangePasswordViewModel with ChangeNotifier {
           ),
         );
         await user.updatePassword(newPW.text); // Firebase update password
-        // DB에 비밀번호 변경
-        final response =
-            await RemoteDataSource.changeUserPw(_convertChangeUserPwToJson());
-        if (response == null) {
-          throw Error();
-        }
         _success();
       } else {
-        print('User does not exist.');
+        throw ErrorDescription('User does not exist');
       }
     } on FirebaseException catch (e) {
-      print('error: ${e.code}');
+      debugPrint('error: ${e.code}');
       if (e.code == 'wrong-password') {
         _showAlert('현재 비밀번호가 일치하지 않습니다.'); // 기존 비밀번호가 틀리면 alert 생성
       } else {
         _showAlert('오류가 발생했습니다.');
       }
+    } catch (e) {
+      debugPrint('Error: $e');
+      if (context.mounted) showErrorPopup(context);
     }
+
     isLoading = false;
     notifyListeners();
-  }
-
-  /// 유저 비밀번호 변경 시 반환
-  String _convertChangeUserPwToJson() {
-    return jsonEncode({
-      "userId": userModel.userId,
-      "password": newPW.text,
-    });
   }
 
   /// 오류 snackbar
@@ -146,7 +135,7 @@ class ChangePasswordViewModel with ChangeNotifier {
 
   /// 비밀번호 변경 성공
   void _success() {
-    showSuccessChangeUserInfo(_context);
+    showSuccessChangeUserInfo(_context, null);
     originPW.clear();
     newPW.clear();
     newCPW.clear();

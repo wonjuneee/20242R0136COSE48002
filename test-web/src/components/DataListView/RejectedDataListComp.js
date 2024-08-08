@@ -3,7 +3,7 @@ import { Box, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import DataList from './DataList';
 import Spinner from 'react-bootstrap/Spinner';
 import Pagination from './Pagination';
-import { useRejectedMeatListFetch } from '../../API/getRejectedMeatListSWR';
+import { useRejectedMeatList } from '../../API/get/getRejectedMeatListSWR';
 
 const navy = '#0F3659';
 
@@ -12,6 +12,7 @@ const RejectedDataListComp = ({
   startDate, // 조회 시작 날짜
   endDate, // 조회 종료 날짜
   pageOffset, // 조회 페이지 offset
+  specieValue,
 }) => {
   // 고기 데이터 목록
   const [meatList, setMeatList] = useState([]);
@@ -32,11 +33,12 @@ const RejectedDataListComp = ({
   };
 
   //API fetch
-  const { data, isLoading, isError } = useRejectedMeatListFetch(
+  const { data, isLoading, isError } = useRejectedMeatList (
     currentPage - 1,
     count,
     startDate,
-    endDate
+    endDate,
+    specieValue
   );
   console.log('반려 육류 데이터 fetch 결과:', data, isLoading, isError);
 

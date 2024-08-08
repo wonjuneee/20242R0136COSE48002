@@ -42,36 +42,34 @@ class MeatRegistrationViewModel with ChangeNotifier {
     try {
       dynamic response = await LocalDataSource.getLocalData(meatModel.userId!);
       if (response == null) {
-        Error();
+        throw Error();
       } else {
         _context = context;
         await _showTempDataDialog(response);
-        notifyListeners();
       }
     } catch (e) {
-      print('에러발생: $e');
+      // TODO : 임시저장 에러 메시지
+      debugPrint('Error: $e');
     }
   }
 
-  /// 임시저장 dialog : 임시 데이터 존재시 결정
+  /// 임시저장 dialog : 임시 데이터 존재시 결정하는 팝업 생성
   Future<void> _showTempDataDialog(dynamic response) async {
-    showDataRegisterDialog(_context, () async {
-      // 처음부터 등록
-      await LocalDataSource.deleteLocalData(meatModel.userId!);
-      popDialog();
-    }, () async {
-      // 이어서 등록
-      isLoading = true;
-      notifyListeners();
-      meatModel.fromJsonTemp(response);
-      isLoading = false;
-      notifyListeners();
-      popDialog();
-    });
-  }
-
-  void popDialog() {
-    _context.pop();
+    showDataRegisterDialog(
+      _context,
+      () async {
+        // 처음부터 등록
+        await LocalDataSource.deleteLocalData(meatModel.userId!);
+        notifyListeners();
+        if (_context.mounted) _context.pop();
+      },
+      () async {
+        // 이어서 등록
+        meatModel.fromJsonTemp(response);
+        notifyListeners();
+        _context.pop();
+      },
+    );
   }
 
   /// STEP 1 : 육류 기본정보 등록
@@ -81,36 +79,19 @@ class MeatRegistrationViewModel with ChangeNotifier {
 
   /// STEP 2 : 육류 단면 촬영
   void clickedImage(BuildContext context) {
-    context.go('/home/registration/image');
+    if (meatModel.basicCompleted) context.go('/home/registration/image');
   }
 
-  /// STEP 3 : 신선육 관능평가
+  /// STEP 3 : 원육 관능평가
   void clickedFreshmeat(BuildContext context) {
-    context.go('/home/registration/freshmeat');
+    if (meatModel.imageCompleted) context.go('/home/registration/freshmeat');
   }
 
-  /// 임시저장 버튼
-  Future<void> clickedTempSaveButton(BuildContext context) async {
-    isLoading = true;
-    notifyListeners();
-    try {
-      dynamic response = await LocalDataSource.saveDataToLocal(
-          meatModel.toJsonTemp(), meatModel.userId!);
-      if (response == null) Error();
-      isLoading = false;
-      notifyListeners();
-      _context = context;
-      // _showTempSavePopup();
-    } catch (e) {
-      print('에러발생: $e');
-    }
-    isLoading = false;
-    notifyListeners();
-  }
-
-  /// 임시저장 완료
-  void _showTempSavePopup() {
-    showTemporarySavePopup(_context);
+  /// 모든 데이터 입력이 완료됐는지 확인하는 함수
+  bool checkAllCompleted() {
+    return meatModel.basicCompleted &&
+        meatModel.imageCompleted &&
+        meatModel.sensoryCompleted;
   }
 
   /// 관리번호 생성 버튼
@@ -119,5 +100,18 @@ class MeatRegistrationViewModel with ChangeNotifier {
     await LocalDataSource.deleteLocalData(meatModel.userId!);
     // 페이지 이동
     if (context.mounted) context.go('/home/success-registration');
+  }
+
+  /// 임시저장 버튼
+  Future<void> clickedTempSaveButton(BuildContext context) async {
+    try {
+      dynamic response = await LocalDataSource.saveDataToLocal(
+          meatModel.toJsonTemp(), meatModel.userId!);
+      if (response == null) throw Error();
+      if (context.mounted) showTemporarySavePopup(context);
+    } catch (e) {
+      // TODO : 임시저장 에러 메시지 팝업
+      debugPrint('Error: $e');
+    }
   }
 }

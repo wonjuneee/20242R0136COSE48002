@@ -47,7 +47,10 @@ class Palette {
   static const Color popupLeftBtnBg = Color(0xffeeeeee);
   static const Color popupRightBtnBg = Color(0xff000000);
 
-  static const Color userLevelCardBg = Color(0xffe1dcff);
+  // static const Color userLevelCardBg = Color(0xffe1dcff);
+  static const Color userNormalCardBg = Color(0xFFFFF856);
+  static const Color userResearcherCardBg = Color(0xFF70E391);
+  static const Color userManagerCardBg = Color(0xFFD9C2FF);
 
   static const Color dDayCardBg = Color(0xffe8e5ff);
 
@@ -63,6 +66,8 @@ class Palette {
 
   static const Color starIcon = Color(0xffffe871);
   static const Color loadingIcon = Color(0xff38c55f);
+
+  static const Color imageErrorColor = Color.fromARGB(255, 180, 179, 179);
   // Text Style Palette
   static TextStyle h1 = TextStyle(fontSize: 50.sp, fontWeight: FontWeight.w700);
   static TextStyle h2 = TextStyle(fontSize: 40.sp, fontWeight: FontWeight.w700);
@@ -146,7 +151,7 @@ class Palette {
   static TextStyle userLevelText = TextStyle(
       fontSize: 16.sp,
       fontWeight: FontWeight.w600,
-      color: const Color(0xff816cff));
+      color: const Color.fromARGB(255, 0, 0, 0));
 
   static TextStyle appBarTitle = TextStyle(
       fontSize: 30.sp,
@@ -274,6 +279,6 @@ class Palette {
     fontSize: 27.sp,
     fontWeight: FontWeight.w600,
     color: Colors.black,
-    decoration: TextDecoration.underline,
+    // decoration: TextDecoration.underline,
   );
 }

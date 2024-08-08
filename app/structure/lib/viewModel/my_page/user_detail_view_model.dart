@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:kpostal/kpostal.dart';
 import 'package:structure/components/custom_app_bar.dart';
@@ -12,10 +10,12 @@ class UserDetailViewModel with ChangeNotifier {
   UserDetailViewModel(this.userModel) {
     _initialize();
   }
+  bool isLoading = false;
+
   String userId = '';
   bool isEditting = false;
-  bool isLoading = false;
   bool isActivateButton = false;
+  bool isChecked = false; // 약관 동의 여부
 
   final TextEditingController mainAddress = TextEditingController();
   final TextEditingController subAddress = TextEditingController();
@@ -43,7 +43,7 @@ class UserDetailViewModel with ChangeNotifier {
     notifyListeners();
   }
 
-  // 주소 검색 버튼 클릭시
+  /// 주소 검색 버튼 클릭
   Future<void> clickedSearchButton(BuildContext context) async {
     isActivateButton = true;
     await Navigator.push(
@@ -63,6 +63,13 @@ class UserDetailViewModel with ChangeNotifier {
     );
   }
 
+  ///checkbox 클릭
+  void clicked1stCheckBox(bool value) {
+    isActivateButton = true;
+    isChecked = value;
+    notifyListeners();
+  }
+
   Future<void> clickedSaveButton(BuildContext context) async {
     isLoading = true;
     isActivateButton = false;
@@ -76,24 +83,38 @@ class UserDetailViewModel with ChangeNotifier {
     if (department.text.isNotEmpty || jobTitle.text.isNotEmpty) {
       userModel.jobTitle = '${department.text}/${jobTitle.text}';
     }
+    userModel.alarm = isChecked;
 
     try {
       // 데이터 전송
-      final response =
-          await RemoteDataSource.updateUser(_convertUserUpdateToJson());
-      if (response == null) throw Error();
-      if (context.mounted) showSuccessChangeUserInfo(context);
-    } catch (e) {
-      print('$e');
-      // 에러 페이지
-    }
+      final response = await RemoteDataSource.updateUser(userModel.toJson());
+      if (response == 200) {
+        if (context.mounted) {
+          isLoading = false;
+          notifyListeners();
 
-    isLoading = false;
-    notifyListeners();
+          showSuccessChangeUserInfo(context, () {
+            Navigator.of(context).pop();
+            Navigator.of(context).pop();
+            // context.go('/home/my-page');
+          });
+        }
+      } else {
+        throw ErrorDescription(response);
+      }
+    } catch (e) {
+      debugPrint('Error: $e');
+      if (context.mounted) showErrorPopup(context);
+    }
   }
 
   void _initialize() {
     userId = userModel.userId ?? 'None';
+    if (userModel.alarm != null) {
+      isChecked = userModel.alarm!;
+    }
+    // isChecked =
+    print('체크 : $isChecked');
     if (userModel.homeAdress != null && userModel.homeAdress!.isNotEmpty) {
       int index = userModel.homeAdress!.indexOf('/');
       if (index != -1 && userModel.homeAdress!.substring(0, index).isNotEmpty) {
@@ -116,20 +137,5 @@ class UserDetailViewModel with ChangeNotifier {
         jobTitle.text = userModel.jobTitle!.substring(index + 1);
       }
     }
-  }
-
-  // 유저 정보 업데이트 시 json 변환
-  String _convertUserUpdateToJson() {
-    Map<String, dynamic> jsonData = {
-      "userId": userModel.userId,
-      "name": userModel.name,
-      "company": userModel.company,
-      "jobTitle": userModel.jobTitle,
-      "homeAddr": userModel.homeAdress,
-      "alarm": userModel.alarm,
-      "type": userModel.type,
-    };
-
-    return jsonEncode(jsonData);
   }
 }

@@ -126,12 +126,45 @@ pigSmall = {
         "뒷사태살",
     ],
 }
+regions = [
+    "강원",
+    "경기",
+    "경상남",
+    "경상북",
+    "광주",
+    "대구",
+    "대전",
+    "부산",
+    "서울",
+    "세종",
+    "울산",
+    "인천",
+    "전라남",
+    "전라북",
+    "제주",
+    "충청남",
+    "충청북",
+]
 usrType = {0: "Normal", 1: "Researcher", 2: "Manager", 3: None}
 sexType = {0: "수", 1: "암", 2: "거세", 3: None}
 gradeNum = {0: "1++", 1: "1+", 2: "1", 3: "2", 4: "3", 5: None}
 statusType = {0: "대기중", 1: "반려", 2: "승인"}
 CATTLE = 0
 PIG = 1
+default_user_id = 'deeplant@example.com'
+default_user_type = 2
+
+def safe_json(val):
+    """
+    Safe Json 변환
+    """
+    try:
+        dictionary = {}
+        for key, value in val.items():
+            dictionary[key] = value
+        return dictionary
+    except (ValueError, TypeError):
+        return None
 
 
 def safe_float(val):
@@ -188,7 +221,7 @@ def convert2datetime(date_string, format):
         return date_string
     if format == 0:
         return datetime.strptime(date_string, "%Y-%m-%dT%H:%M:%S")
-    if format == 1:
+    elif format == 1:
         tz = pytz.timezone("Asia/Seoul")
         return datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S")
     elif format == 2:
@@ -215,14 +248,15 @@ def convert2string(date_object, format):
 
 
 def item_encoder(data_dict, item, input_data=None):
-    datetime1_cvr = ["createdAt", "loginAt", "updatedAt"]
+    datetime0_cvr = ["filmedAt", "createdAt"]
+    datetime1_cvr = ["loginAt", "updatedAt"]
     datetime2_cvr = ["butcheryYmd", "birthYmd", "date"]
     str_cvr = [
         "id",
         "userId",
         "traceNum",
         "farmAddr",
-        "farmerNm",
+        "farmerName",
         "name",
         "company",
         "jobTitle",
@@ -240,9 +274,8 @@ def item_encoder(data_dict, item, input_data=None):
         "overall",
         "flavor",
         "juiciness",
-        "tenderness",
         "umami",
-        "palability",
+        "palatability",
         "L",
         "a",
         "b",
@@ -258,8 +291,11 @@ def item_encoder(data_dict, item, input_data=None):
         "bitterness",
         "richness",
     ]
-    bool_cvr = ["alarm"]
-    if item in datetime1_cvr:
+    json_cvr = ["tenderness"]
+    bool_cvr = ["alarm", "isHeated"]
+    if item in datetime0_cvr:
+        data_dict[item] = convert2datetime(data_dict.get(item), 0)
+    elif item in datetime1_cvr:
         data_dict[item] = convert2datetime(data_dict.get(item), 1)
     elif item in datetime2_cvr:
         data_dict[item] = convert2datetime(data_dict.get(item), 2)
@@ -269,6 +305,8 @@ def item_encoder(data_dict, item, input_data=None):
         data_dict[item] = safe_int(data_dict.get(item))
     elif item in float_cvr:
         data_dict[item] = safe_float(data_dict.get(item))
+    elif item in json_cvr:
+        data_dict[item] = safe_json(data_dict.get(item))
     elif item in bool_cvr:
         data_dict[item] = safe_bool(data_dict.get(item))
     else:
@@ -288,14 +326,15 @@ def calId(id, s_id, type):
 
 
 def item_encoder(data_dict, item, input_data=None):
-    datetime1_cvr = ["createdAt", "loginAt", "updatedAt"]
+    datetime0_cvr = ["filmedAt", "createdAt", "updatedAt"]
+    datetime1_cvr = ["loginAt"]
     datetime2_cvr = ["butcheryYmd", "birthYmd", "date"]
     str_cvr = [
         "id",
         "userId",
         "traceNum",
         "farmAddr",
-        "farmerNm",
+        "farmerName",
         "name",
         "company",
         "jobTitle",
@@ -313,9 +352,8 @@ def item_encoder(data_dict, item, input_data=None):
         "overall",
         "flavor",
         "juiciness",
-        "tenderness",
         "umami",
-        "palability",
+        "palatability",
         "L",
         "a",
         "b",
@@ -331,8 +369,11 @@ def item_encoder(data_dict, item, input_data=None):
         "bitterness",
         "richness",
     ]
-    bool_cvr = ["alarm"]
-    if item in datetime1_cvr:
+    json_cvr = ["tenderness"]
+    bool_cvr = ["alarm", "isHeated"]
+    if item in datetime0_cvr:
+        data_dict[item] = convert2datetime(data_dict.get(item), 0)
+    elif item in datetime1_cvr:
         data_dict[item] = convert2datetime(data_dict.get(item), 1)
     elif item in datetime2_cvr:
         data_dict[item] = convert2datetime(data_dict.get(item), 2)
@@ -342,6 +383,8 @@ def item_encoder(data_dict, item, input_data=None):
         data_dict[item] = safe_int(data_dict.get(item))
     elif item in float_cvr:
         data_dict[item] = safe_float(data_dict.get(item))
+    elif item in json_cvr:
+        data_dict[item] = safe_json(data_dict.get(item))
     elif item in bool_cvr:
         data_dict[item] = safe_bool(data_dict.get(item))
     else:
@@ -377,6 +420,7 @@ def transfer_folder_image(s3_conn, firestore_conn, db_session, id, new_meat, fol
 
         new_meat.imagePath = s3_conn.get_image_url(s3_conn.bucket, f"{folder}/{id}")
         db_session.merge(new_meat)
+        # setattr(new_meat, 'imagePath', new_meat.imagePath)
         db_session.commit()
     except Exception as e:
         db_session.rollback()

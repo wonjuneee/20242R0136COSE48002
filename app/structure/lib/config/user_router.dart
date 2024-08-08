@@ -9,15 +9,15 @@ import 'package:provider/provider.dart';
 import 'package:structure/model/meat_model.dart';
 import 'package:structure/model/user_model.dart';
 import 'package:structure/screen/data_management/normal/edit_meat_data_screen.dart';
-import 'package:structure/screen/data_management/normal/not_editable/freshmeat_eval_not_editable_sceen.dart';
+import 'package:structure/screen/data_management/normal/not_editable/sensory_eval_not_editable_sceen.dart';
 import 'package:structure/screen/data_management/normal/not_editable/insertion_meat_image_not_editable_screen.dart';
 import 'package:structure/screen/data_management/normal/not_editable/insertion_meat_info_not_editable_screen.dart';
 import 'package:structure/screen/data_management/researcher/add_processed_meat_main_screen.dart';
-import 'package:structure/screen/data_management/researcher/add_raw_meat_main_screen.dart';
+import 'package:structure/screen/data_management/researcher/add_raw_meat_screen.dart';
 import 'package:structure/screen/data_management/researcher/data_add_home_screen.dart';
 import 'package:structure/screen/data_management/normal/data_management_home_screen.dart';
 import 'package:structure/screen/data_management/researcher/data_management_home_tab_screen.dart';
-import 'package:structure/screen/data_management/researcher/heatedmeat_eval_screen.dart';
+import 'package:structure/screen/data_management/researcher/insertion_heated_sensory_screen.dart';
 import 'package:structure/screen/data_management/researcher/insertion_lab_data_screen.dart';
 import 'package:structure/screen/data_management/researcher/insertion_tongue_data_screen.dart';
 import 'package:structure/screen/home_screen.dart';
@@ -33,7 +33,7 @@ import 'package:structure/screen/my_page/user_info_screen.dart';
 import 'package:structure/screen/sign_in/password_reset_screen.dart';
 import 'package:structure/screen/sign_in/complete_reset_screen.dart';
 import 'package:structure/screen/sign_up/complete_sign_up_screen.dart';
-import 'package:structure/screen/meat_registration/freshmeat_eval_screen.dart';
+import 'package:structure/screen/meat_registration/sensory_eval_screen.dart';
 import 'package:structure/screen/sign_up/insertion_user_detail_screen.dart';
 import 'package:structure/screen/sign_up/insertion_user_info_screen.dart';
 import 'package:structure/screen/meat_registration/meat_registration_screen.dart';
@@ -43,20 +43,20 @@ import 'package:structure/viewModel/data_management/researcher/add_raw_meat_view
 import 'package:structure/viewModel/data_management/researcher/data_add_home_view_model.dart';
 import 'package:structure/viewModel/data_management/normal/data_management_view_model.dart';
 import 'package:structure/viewModel/data_management/normal/edit_meat_data_view_model.dart';
-import 'package:structure/viewModel/data_management/normal/not_editable/freshmeat_eval_not_editable_view_model.dart';
+import 'package:structure/viewModel/data_management/normal/not_editable/sensoty_eval_not_editable_view_model.dart';
 import 'package:structure/viewModel/data_management/normal/not_editable/insertion_meat_image_not_editable_view_model.dart';
 import 'package:structure/viewModel/data_management/normal/not_editable/insertion_meat_info_not_editable_view_model.dart';
-import 'package:structure/viewModel/data_management/researcher/data_management_researcher_view_model.dart';
-import 'package:structure/viewModel/data_management/researcher/heatedmeat_eval_view_model.dart';
+import 'package:structure/viewModel/data_management/researcher/data_management_home_tab_view_model.dart';
+import 'package:structure/viewModel/data_management/researcher/insertion_heated_sensory_view_model.dart';
 import 'package:structure/viewModel/data_management/researcher/insertion_lab_data_view_model.dart';
 import 'package:structure/viewModel/data_management/researcher/insertion_tongue_data_view_model.dart';
 import 'package:structure/viewModel/home_view_model.dart';
 import 'package:structure/viewModel/meat_registration/camera_view_model.dart';
 import 'package:structure/viewModel/meat_registration/creation_management_num_view_model.dart.dart';
-import 'package:structure/viewModel/meat_registration/freshmeat_eval_view_model.dart';
+import 'package:structure/viewModel/meat_registration/insertion_sensory_eval_view_model.dart';
 import 'package:structure/viewModel/meat_registration/insertion_meat_info_view_model.dart';
 import 'package:structure/viewModel/meat_registration/insertion_trace_num_view_model.dart';
-import 'package:structure/viewModel/meat_registration/registration_meat_image_view_model.dart';
+import 'package:structure/viewModel/meat_registration/insertion_meat_image_view_model.dart';
 import 'package:structure/viewModel/my_page/change_password_view_model.dart';
 import 'package:structure/viewModel/my_page/delete_user_view_model.dart';
 import 'package:structure/viewModel/my_page/user_detail_view_model.dart';
@@ -109,7 +109,7 @@ class UserRouter {
               builder: (context, state) => ChangeNotifierProvider(
                 create: (context) =>
                     PasswordResetViewModel(userModel: userModel),
-                builder: (context, child) => const PasswordResetScreen(),
+                child: const PasswordResetScreen(),
               ),
             ),
             // 비밀번호 변경 완료
@@ -128,8 +128,9 @@ class UserRouter {
         GoRoute(
           path: '/home',
           builder: (context, state) => ChangeNotifierProvider(
-              create: (context) => HomeViewModel(userModel: userModel),
-              child: const HomeScreen()),
+            create: (context) => HomeViewModel(userModel: userModel),
+            child: const HomeScreen(),
+          ),
           routes: [
             // 육류 등록 페이지
             GoRoute(
@@ -161,29 +162,30 @@ class UserRouter {
                 ),
                 // 육류 이미지
                 GoRoute(
-                    path: 'image',
-                    builder: (context, state) => ChangeNotifierProvider(
-                          create: (context) => RegistrationMeatImageViewModel(
-                              meatModel, userModel),
-                          child: const RegistrationMeatImageScreen(),
-                        ),
-                    routes: [
-                      // 사진 촬영 카메라
-                      GoRoute(
-                        path: 'camera',
-                        builder: (context, state) => ChangeNotifierProvider(
-                          create: (context) => CameraViewModel(),
-                          child: const CameraScreen(),
-                        ),
+                  path: 'image',
+                  builder: (context, state) => ChangeNotifierProvider(
+                    create: (context) =>
+                        InsertionMeatImageViewModel(meatModel, userModel, true),
+                    child: const RegistrationMeatImageScreen(),
+                  ),
+                  routes: [
+                    // 사진 촬영 카메라
+                    GoRoute(
+                      path: 'camera',
+                      builder: (context, state) => ChangeNotifierProvider(
+                        create: (context) => CameraViewModel(),
+                        child: const CameraScreen(),
                       ),
-                    ]),
-
-                // 신선육 관능평가
+                    ),
+                  ],
+                ),
+                // 원육 관능평가
                 GoRoute(
                   path: 'freshmeat',
                   builder: (context, state) => ChangeNotifierProvider(
-                    create: (context) => FreshMeatEvalViewModel(meatModel),
-                    child: const FreshMeatEvalScreen(),
+                    create: (context) =>
+                        InsertionSensoryEvalViewModel(meatModel, userModel),
+                    child: const SensoryEvalScreen(),
                   ),
                 ),
               ],
@@ -202,7 +204,7 @@ class UserRouter {
               path: 'my-page',
               builder: (context, state) => ChangeNotifierProvider(
                 create: (context) => UserInfoViewModel(userModel),
-                builder: (context, child) => const UserInfoScreen(),
+                child: const UserInfoScreen(),
               ),
               routes: [
                 // 유저 상세 정보
@@ -210,7 +212,7 @@ class UserRouter {
                   path: 'user-detail',
                   builder: (context, state) => ChangeNotifierProvider(
                     create: (context) => UserDetailViewModel(userModel),
-                    builder: (context, child) => const UserDetailScreen(),
+                    child: const UserDetailScreen(),
                   ),
                 ),
                 // 비밀번호 변경
@@ -219,7 +221,7 @@ class UserRouter {
                   builder: (context, state) => ChangeNotifierProvider(
                     create: (context) =>
                         ChangePasswordViewModel(userModel: userModel),
-                    builder: (context, child) => const ChangePasswordScreen(),
+                    child: const ChangePasswordScreen(),
                   ),
                 ),
                 // 회원 탈퇴
@@ -228,7 +230,7 @@ class UserRouter {
                   builder: (context, state) => ChangeNotifierProvider(
                     create: (context) =>
                         DeleteUserViewModel(userModel: userModel),
-                    builder: (context, child) => const DeleteUserScreen(),
+                    child: const DeleteUserScreen(),
                   ),
                 )
               ],
@@ -245,9 +247,10 @@ class UserRouter {
                 GoRoute(
                   path: 'edit',
                   builder: (context, state) => ChangeNotifierProvider(
-                      create: (context) =>
-                          EditMeatDataViewModel(meatModel, userModel),
-                      child: const EditMeatDataScreen()),
+                    create: (context) =>
+                        EditMeatDataViewModel(meatModel, userModel),
+                    child: const EditMeatDataScreen(),
+                  ),
                   routes: [
                     // 수정불가
                     GoRoute(
@@ -262,8 +265,7 @@ class UserRouter {
                       path: 'image',
                       builder: (context, state) => ChangeNotifierProvider(
                         create: (context) =>
-                            InsertionMeatImageNotEditableViewModel(
-                                meatModel, userModel, 0),
+                            InsertionMeatImageNotEditableViewModel(meatModel),
                         child: const InsertionMeatImageNotEditableScreen(),
                       ),
                     ),
@@ -271,8 +273,8 @@ class UserRouter {
                       path: 'freshmeat',
                       builder: (context, state) => ChangeNotifierProvider(
                         create: (context) =>
-                            FreshMeatEvalNotEditableViewModel(meatModel, false),
-                        child: const FreshMeatEvalNotEditableScreen(),
+                            SensoryEvalNotEditableViewModel(meatModel, false),
+                        child: const SensoryEvalNotEditableScreen(),
                       ),
                     ),
                     // 수정 가능
@@ -284,37 +286,20 @@ class UserRouter {
                         child: const InsertionMeatInfoScreen(),
                       ),
                     ),
-                    // GoRoute(
-                    //   path: 'trace-editable',
-                    //   builder: (context, state) => ChangeNotifierProvider(
-                    //     create: (context) =>
-                    //         InsertionTraceNumViewModel(meatModel),
-                    //     child: const InsertionTraceNumScreen(),
-                    //   ),
-                    //   routes: [
-                    //     GoRoute(
-                    //       path: 'info-editable',
-                    //       builder: (context, state) => ChangeNotifierProvider(
-                    //         create: (context) =>
-                    //             InsertionMeatInfoViewModel(meatModel),
-                    //         child: const InsertionMeatInfoScreen(),
-                    //       ),
-                    //     ),
-                    //   ],
-                    // ),
                     GoRoute(
                       path: 'image-editable',
                       builder: (context, state) => ChangeNotifierProvider(
-                        create: (context) => RegistrationMeatImageViewModel(
-                            meatModel, userModel),
+                        create: (context) => InsertionMeatImageViewModel(
+                            meatModel, userModel, true),
                         child: const RegistrationMeatImageScreen(),
                       ),
                     ),
                     GoRoute(
                       path: 'freshmeat-editable',
                       builder: (context, state) => ChangeNotifierProvider(
-                        create: (context) => FreshMeatEvalViewModel(meatModel),
-                        child: const FreshMeatEvalScreen(),
+                        create: (context) =>
+                            InsertionSensoryEvalViewModel(meatModel, userModel),
+                        child: const SensoryEvalScreen(),
                       ),
                     ),
                   ],
@@ -326,46 +311,105 @@ class UserRouter {
               path: 'data-manage-researcher',
               builder: (context, state) => ChangeNotifierProvider(
                 create: (context) =>
-                    DataManagementHomeResearcherViewModel(meatModel, userModel),
-                child:
-                    // const DataManagementHomeResearcherScreen(),
-                    const DataManagementHomeTabScreen(),
+                    DataManagementHomeTabViewModel(meatModel, userModel),
+                child: const DataManagementHomeTabScreen(),
               ),
               routes: [
                 GoRoute(
                   path: 'add',
                   builder: (context, state) => ChangeNotifierProvider(
-                      create: (context) => DataAddHomeViewModel(meatModel),
-                      child: const DataAddHome()),
+                    create: (context) => DataAddHomeViewModel(meatModel),
+                    child: const DataAddHome(),
+                  ),
                   routes: [
                     GoRoute(
                       path: 'raw-meat',
                       builder: (context, state) => ChangeNotifierProvider(
-                          create: (context) => AddRawMeatViewModel(),
-                          child: StepFreshMeat(
-                            meatModel: meatModel,
-                          )),
+                        create: (context) => AddRawMeatViewModel(),
+                        child: AddRawMeatScreen(meatModel: meatModel),
+                      ),
                       routes: [
+                        // 수정 불가 원육 기본정보
                         GoRoute(
-                          path: 'heated-meat',
+                          path: 'info',
                           builder: (context, state) => ChangeNotifierProvider(
-                              create: (context) =>
-                                  HeatedMeatEvalViewModel(meatModel),
-                              child: const HeatedMeatEvaluation()),
+                            create: (context) =>
+                                InsertionMeatInfoNotEditableViewModel(
+                                    meatModel),
+                            child: const InsertionMeatInfoNotEditableScreen(),
+                          ),
                         ),
+                        // 수정 불가 원육 단면 촬영
+                        GoRoute(
+                          path: 'image-noteditable',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) =>
+                                InsertionMeatImageNotEditableViewModel(
+                                    meatModel),
+                            child: const InsertionMeatImageNotEditableScreen(),
+                          ),
+                        ),
+                        // 수정 불가 원육 관능평가
+                        GoRoute(
+                          path: 'sensory',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) =>
+                                SensoryEvalNotEditableViewModel(
+                                    meatModel, false),
+                            child: const SensoryEvalNotEditableScreen(),
+                          ),
+                        ),
+                        // 원육 전자혀 데이터
                         GoRoute(
                           path: 'tongue',
                           builder: (context, state) => ChangeNotifierProvider(
-                            create: (context) =>
-                                InsertionTongueDataViewModel(meatModel),
+                            create: (context) => InsertionTongueDataViewModel(
+                                meatModel, userModel, true),
                             child: const InsertionTongueDataScreen(),
                           ),
                         ),
+                        // 원육 실험 데이터
                         GoRoute(
                           path: 'lab',
                           builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionLabDataViewModel(
+                                meatModel, userModel, true),
+                            child: const InsertionLabDataScreen(),
+                          ),
+                        ),
+                        // 가열육 단면 촬영
+                        GoRoute(
+                          path: 'heated-image',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionMeatImageViewModel(
+                                meatModel, userModel, false),
+                            child: const RegistrationMeatImageScreen(),
+                          ),
+                        ),
+                        // 가열육 관능평가 데이터
+                        GoRoute(
+                          path: 'heated-sensory',
+                          builder: (context, state) => ChangeNotifierProvider(
                             create: (context) =>
-                                InsertionLabDataViewModel(meatModel),
+                                InsertionHeatedSensoryViewModel(
+                                    meatModel, userModel),
+                            child: const InsertionHeatedSensoryScreen(),
+                          ),
+                        ),
+                        GoRoute(
+                          path: 'heated-tongue',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionTongueDataViewModel(
+                                meatModel, userModel, false),
+                            child: const InsertionTongueDataScreen(),
+                          ),
+                        ),
+                        // 원육 실험 데이터
+                        GoRoute(
+                          path: 'heated-lab',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionLabDataViewModel(
+                                meatModel, userModel, false),
                             child: const InsertionLabDataScreen(),
                           ),
                         ),
@@ -374,46 +418,72 @@ class UserRouter {
                     GoRoute(
                       path: 'processed-meat',
                       builder: (context, state) => ChangeNotifierProvider(
-                          create: (context) => AddProcessedMeatViewModel(),
-                          child:
-                              AddProcessedMeatMainScreen(meatModel: meatModel)),
+                        create: (context) => AddProcessedMeatViewModel(),
+                        child: AddProcessedMeatMainScreen(meatModel: meatModel),
+                      ),
                       routes: [
                         GoRoute(
-                            path: 'image',
-                            builder: (context, state) => ChangeNotifierProvider(
-                                  create: (context) =>
-                                      RegistrationMeatImageViewModel(
-                                          meatModel, userModel),
-                                  child: const RegistrationMeatImageScreen(),
-                                )),
-                        GoRoute(
-                          path: 'eval',
+                          path: 'image',
                           builder: (context, state) => ChangeNotifierProvider(
-                            create: (context) =>
-                                FreshMeatEvalViewModel(meatModel),
-                            child: const FreshMeatEvalScreen(),
+                            create: (context) => InsertionMeatImageViewModel(
+                                meatModel, userModel, true),
+                            child: const RegistrationMeatImageScreen(),
                           ),
                         ),
                         GoRoute(
-                          path: 'heated-meat',
+                          path: 'sensory',
                           builder: (context, state) => ChangeNotifierProvider(
-                              create: (context) =>
-                                  HeatedMeatEvalViewModel(meatModel),
-                              child: const HeatedMeatEvaluation()),
+                            create: (context) => InsertionSensoryEvalViewModel(
+                                meatModel, userModel),
+                            child: const SensoryEvalScreen(),
+                          ),
                         ),
                         GoRoute(
                           path: 'tongue',
                           builder: (context, state) => ChangeNotifierProvider(
-                            create: (context) =>
-                                InsertionTongueDataViewModel(meatModel),
+                            create: (context) => InsertionTongueDataViewModel(
+                                meatModel, userModel, true),
                             child: const InsertionTongueDataScreen(),
                           ),
                         ),
                         GoRoute(
                           path: 'lab',
                           builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionLabDataViewModel(
+                                meatModel, userModel, true),
+                            child: const InsertionLabDataScreen(),
+                          ),
+                        ),
+                        GoRoute(
+                          path: 'heated-image',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionMeatImageViewModel(
+                                meatModel, userModel, false),
+                            child: const RegistrationMeatImageScreen(),
+                          ),
+                        ),
+                        GoRoute(
+                          path: 'heated-sensory',
+                          builder: (context, state) => ChangeNotifierProvider(
                             create: (context) =>
-                                InsertionLabDataViewModel(meatModel),
+                                InsertionHeatedSensoryViewModel(
+                                    meatModel, userModel),
+                            child: const InsertionHeatedSensoryScreen(),
+                          ),
+                        ),
+                        GoRoute(
+                          path: 'heated-tongue',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionTongueDataViewModel(
+                                meatModel, userModel, false),
+                            child: const InsertionTongueDataScreen(),
+                          ),
+                        ),
+                        GoRoute(
+                          path: 'heated-lab',
+                          builder: (context, state) => ChangeNotifierProvider(
+                            create: (context) => InsertionLabDataViewModel(
+                                meatModel, userModel, false),
                             child: const InsertionLabDataScreen(),
                           ),
                         ),
@@ -442,8 +512,7 @@ class UserRouter {
                       path: 'image',
                       builder: (context, state) => ChangeNotifierProvider(
                         create: (context) =>
-                            InsertionMeatImageNotEditableViewModel(
-                                meatModel, userModel, 0),
+                            InsertionMeatImageNotEditableViewModel(meatModel),
                         child: const InsertionMeatImageNotEditableScreen(),
                       ),
                     ),
@@ -451,8 +520,8 @@ class UserRouter {
                       path: 'freshmeat',
                       builder: (context, state) => ChangeNotifierProvider(
                         create: (context) =>
-                            FreshMeatEvalNotEditableViewModel(meatModel, false),
-                        child: const FreshMeatEvalNotEditableScreen(),
+                            SensoryEvalNotEditableViewModel(meatModel, false),
+                        child: const SensoryEvalNotEditableScreen(),
                       ),
                     ),
                   ],

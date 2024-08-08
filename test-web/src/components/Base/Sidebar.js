@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import { styled, createTheme, ThemeProvider } from '@mui/material/styles';
@@ -23,48 +23,20 @@ import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import LogoutIcon from '@mui/icons-material/Logout';
-import DataThresholdingIcon from '@mui/icons-material/DataThresholding';
-import StackedLineChartIcon from '@mui/icons-material/StackedLineChart';
-import GroupIcon from '@mui/icons-material/Group';
-import HomeIcon from '@mui/icons-material/Home';
-import { HiOutlineChip } from 'react-icons/hi';
 
 import DeeplantLong from '../../src_assets/Deeplant_long.webp';
 import LOGO from '../../src_assets/LOGO.png';
+import CreateFilterQueryParams from '../../Utils/createFilterQueryParams';
+import pageListItems from '../../Utils/pageListItems';
 
 const Alert = React.forwardRef(function Alert(props, ref) {
   return <MuiAlert elevation={6} ref={ref} variant="filled" {...props} />;
 });
 
-const mainListItems = [
-  {
-    label: '홈',
-    icon: <HomeIcon sx={{ fontSize: 30 }} />,
-    path: '/Home',
-  },
-  {
-    label: '대시보드',
-    icon: <DataThresholdingIcon sx={{ fontSize: 30 }} />,
-    path: '/DataManage',
-  },
-  {
-    label: '데이터 예측',
-    icon: <HiOutlineChip style={{ fontSize: 30 }} />,
-    path: '/PA',
-  },
-  {
-    label: '통계 분석',
-    icon: <StackedLineChartIcon sx={{ fontSize: 30 }} />,
-    path: '/stats',
-  },
-  {
-    label: '사용자 관리',
-    icon: <GroupIcon sx={{ fontSize: 30 }} />,
-    path: '/UserManagement',
-  },
-];
+const mainListItems = pageListItems;
 
-const drawerWidth = `${(345 / 1920) * 100}vw`; // Width when drawer is open
+// const drawerWidth = `${(345 / 1920) * 100}vw`; // Width when drawer is open
+const drawerWidth = '345px'; // Width when drawer is open
 const defaultTheme = createTheme();
 
 const Drawer = styled(MuiDrawer, {
@@ -81,14 +53,15 @@ const Drawer = styled(MuiDrawer, {
     boxSizing: 'border-box',
     backgroundColor: '#FFFFFF', //사이드바 배경
     boxShadow: `${(5 / 1920) * 100}vw 0px ${(30 / 1080) * 100}vh 0px rgba(238, 238, 238, 0.50)`, // 사이드바 그림자
+    overflowX: 'hidden',
     ...(!open && {
       transition: theme.transitions.create('width', {
         easing: theme.transitions.easing.sharp,
         duration: theme.transitions.duration.leavingScreen,
       }),
-      width: theme.spacing(7),
+      width: '64px', // 고정된 너비 설정
       [theme.breakpoints.up('sm')]: {
-        width: theme.spacing(8),
+        width: '64px', // sm 브레이크포인트 이상에서도 동일한 너비 유지
       },
     }),
   },
@@ -119,32 +92,18 @@ function Sidebar() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const UserInfo = JSON.parse(localStorage.getItem('UserInfo'));
-  const userEmail = UserInfo.userId;
-  console.log(userEmail);
+  //const userEmail = UserInfo.userId;
+
   const toggleDrawer = () => {
     setOpen(!open);
   };
-  const logout = async () => {
-    try {
-      // const response = await fetch(
-      //   `http://${apiIP}/user/logout?id=${userEmail}`
-      // );
-      // const auth = getAuth();
-      // await signOut(auth);
-      // console.log(response);
-      localStorage.setItem('isLoggedIn', 'false');
-      navigate('/');
-      window.location.reload();
-    } catch (error) {
-      console.log(error.message);
-    }
+  
+  const handleSnackbarClose = () => {
+    setSnackbarOpen(false);
   };
-
-  useEffect(() => {}, [location]);
 
   const handleListItemClick = (item) => {
     if (item.label === '사용자 관리' && UserInfo.type !== 'Manager') {
@@ -152,11 +111,11 @@ function Sidebar() {
       setSnackbarOpen(true);
     } else {
       navigate(item.path);
+      if (item.label !== '홈' && item.label !== '사용자 관리') {
+        const queryParams = <CreateFilterQueryParams />;
+        navigate(`${item.path}?${queryParams}`);
+      }
     }
-  };
-
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
   };
 
   return (
@@ -231,7 +190,7 @@ function Sidebar() {
               </Typography>
             )}
           </IconButton>
-          <IconButton onClick={logout}>
+          <IconButton onClick={<logout />}>
             <div
               style={{
                 backgroundColor: '#E8E8E8',
@@ -253,7 +212,7 @@ function Sidebar() {
           sx={{
             pt: '14px', // 홈 버튼에만 추가 상단 패딩
             pb: '12px', // 홈 버튼에만 추가 하단 패딩
-            ...(open && { mt: '20px' }), // 열렸을 때 추가 상단 여백
+            ...(open && { mt: '8px' }), // 열렸을 때 추가 상단 여백
           }}
         >
           {mainListItems.map((item) => (
@@ -268,12 +227,20 @@ function Sidebar() {
                 onClick={() => handleListItemClick(item)}
                 selected={location.pathname === item.path}
                 sx={{
+                  margin: '0 auto 16px auto',
+                  width: open ? 245 : 64,
+                  height: 64,
+                  display: 'flex',
+                  justifyContent: 'flex-start',
+                  alignItems: 'center',
                   ...(location.pathname === item.path && {
                     '& .MuiSvgIcon-root, .MuiTypography-root': {
                       color: '#FFFFFF',
                     },
                     '&.Mui-selected': {
                       backgroundColor: '#7BD758',
+                      borderRadius: '16px',
+                      boxShadow: 3,
                     },
                   }),
                 }}
@@ -294,7 +261,7 @@ function Sidebar() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            px: [1],
+            px: [1.2],
           }}
         >
           <IconButton onClick={toggleDrawer}>

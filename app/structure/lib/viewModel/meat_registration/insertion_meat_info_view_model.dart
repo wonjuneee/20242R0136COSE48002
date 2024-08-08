@@ -18,6 +18,7 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
   InsertionMeatInfoViewModel(this.meatModel) {
     initialize();
   }
+  bool isLoading = false;
 
   // 초기 변수
   String speciesValue = '';
@@ -25,13 +26,10 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
   String? secondaryValue;
 
   // 완료 체크
-  bool isSelectedSpecies = false;
-  bool isSelectedPrimal = false;
-  bool isSelectedSecondary = false;
-  bool completed = false;
-
-  bool _speciesCheck = false; // true - 돼지, false - 소
-  bool isLoading = false;
+  bool isSelectedSpecies = false; // 종류 선택 완료 여부
+  bool isSelectedPrimal = false; // 대분할 선택 완료 여부
+  bool isSelectedSecondary = false; // 소분할 선택 완료 여부
+  bool completed = false; // 전체 완료 여부
 
   // 'DropdownButton'에 사용될 데이터 변수
   List<String> largeDiv = [];
@@ -44,35 +42,28 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
     Text('돼지', style: Palette.h4Grey),
   ];
 
-  //
+  // 선택된 species
+  // 0 - 소, 1 - 돼지
   List<bool> selectedSpecies = List.generate(2, (index) => false);
-
-  // 소인지 확인
-  bool speciesCheckFunc() {
-    if (meatModel.speciesValue != null) {
-      if (meatModel.speciesValue! == '돼지') {
-        _speciesCheck = true;
-      }
-    }
-    return _speciesCheck;
-  }
 
   /// 초기 데이터 할당
   Future<void> initialize() async {
-    // 수정 데이터
-
     if (meatModel.speciesValue != null) {
+      // 축산물 api에서 받아온 데이터는 한우가 될 수도 있음
       if (meatModel.speciesValue! == '한우') {
+        // 소 설정
         speciesValue = '소';
         selectedSpecies[0] = true;
       } else {
+        // 돼지 설정
         speciesValue = meatModel.speciesValue!;
         selectedSpecies[1] = true;
       }
+
       isSelectedSpecies = true;
     }
 
-    // 수정 데이터
+    // primaryValue, secondaryValue가 null이 아니면 수정하는 데이터
     // 소분할
     if (meatModel.secondaryValue != null) {
       primalValue = meatModel.primalValue; // 대분할 설정
@@ -83,15 +74,20 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
     }
 
     // 종, 부위를 조회 하여, 데이터 할당
-    Map<String, dynamic> data = await RemoteDataSource.getMeatSpecies();
-    // print(data);
-    // print(speciesValue);
-    dataTable = data[speciesValue];
-    // print(dataTable);
+    try {
+      dynamic response = await RemoteDataSource.getMeatSpecies();
+      if (response is Map<String, dynamic>) {
+        dataTable = response[speciesValue];
+      } else {
+        throw Error();
+      }
+    } catch (e) {
+      debugPrint('Error getting getMeatSpecies: $e');
+      // TODO : 에러 메시지 팝업
+    }
 
     // 종에 따른 대분류 데이터 할당
     List<String> lDiv = [];
-
     if (dataTable != null) {
       for (String key in dataTable!.keys) {
         lDiv.add(key);
@@ -99,7 +95,6 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
     }
 
     largeDiv = lDiv;
-
     if (isSelectedSecondary) {
       litteDiv = List<String>.from(
           dataTable![primalValue].map((element) => element.toString()));
@@ -108,24 +103,20 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
     notifyListeners();
   }
 
-  // 육류 정보 저장
+  /// 소인지 확인하는 함수
+  /// true - 돼지, false - 소
+  bool speciesCheckFunc() {
+    return speciesValue == '돼지';
+  }
+
+  /// 육류 정보 저장
   void saveMeatData() {
-    meatModel.speciesValue = speciesValue;
+    meatModel.speciesValue = speciesValue; // 한우일 수 있기 때문에 업데이트
     meatModel.primalValue = primalValue;
     meatModel.secondaryValue = secondaryValue;
   }
 
-  // 종 분류 지정
-  void setSpecies() {
-    isSelectedSpecies = true;
-    isSelectedPrimal = false;
-    isSelectedSecondary = false;
-    primalValue = null;
-    secondaryValue = null;
-    notifyListeners();
-  }
-
-  // 대분류 지정
+  /// 대분류 지정
   void setPrimal() {
     isSelectedPrimal = true;
     secondaryValue = null;
@@ -136,10 +127,10 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
     notifyListeners();
   }
 
-  // 소분류 지정
+  /// 소분류 지정
   void setSecondary() {
     isSelectedSecondary = true;
-    completed = true;
+    if (isSelectedPrimal) completed = true;
     notifyListeners();
   }
 
@@ -150,36 +141,46 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
     };
   }
 
-  // 저장 버튼 : 객체에 데이터 할당
+  /// 저장 버튼 : 객체에 데이터 할당
   Future<void> clickedNextButton(BuildContext context) async {
     isLoading = true;
     notifyListeners();
 
-    await tempSave();
     saveMeatData();
     meatModel.checkCompleted();
 
-    if (meatModel.id != null) {
-      final response =
-          await RemoteDataSource.sendMeatData(null, meatModel.toJsonBasic());
+    // API 전송은 원육 등록이 아닌 경우에만 (meatId != null)
+    // 원육은 creation_management_num에서 처리
+    if (meatModel.meatId != null) {
+      try {
+        // 수정된 기본 정보 업데이트
+        final response =
+            await RemoteDataSource.patchMeatData(null, meatModel.toJsonBasic());
 
-      if (response == null) {
-        // 에러 페이지
-      } else {
-        isLoading = false;
-        notifyListeners();
+        if (response == 200) {
+          isLoading = false;
+          notifyListeners();
 
-        if (context.mounted) {
-          showDataManageSucceedPopup(context, () {
-            context.go('/home/data-manage-normal/edit');
-          });
+          if (context.mounted) {
+            showDataManageSucceedPopup(
+              context,
+              () => context.go('/home/data-manage-normal/edit'),
+            );
+          }
+        } else {
+          throw ErrorDescription(response);
         }
+      } catch (e) {
+        debugPrint('Error: $e');
+        if (context.mounted) showErrorPopup(context);
       }
     } else {
+      // 신규 생성
+      await tempSave();
+
       isLoading = false;
       notifyListeners();
-
-      context.go('/home/registration');
+      if (context.mounted) context.go('/home/registration');
     }
   }
 
@@ -190,7 +191,8 @@ class InsertionMeatInfoViewModel with ChangeNotifier {
           meatModel.toJsonTemp(), meatModel.userId!);
       if (response == null) Error();
     } catch (e) {
-      print('에러발생: $e');
+      debugPrint('Error: $e');
+      // TODO : 임시저장 에러 메시지 팝업
     }
   }
 }

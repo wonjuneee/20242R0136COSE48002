@@ -6,16 +6,19 @@ import { Card, CardHeader, Button, ButtonGroup, Box } from '@mui/material';
 // utils
 import { fNumber } from './formatNumber';
 // components
-import useChart from './usePieChart';
+import useChart from './helper/usePieChart';
 import { useEffect, useState } from 'react';
 
-import { usePieChartFetch } from '../../../API/listCharts/getPieChartSWR';
+import { useStatisticPieChart } from '../../../API/statistic/statsticPieChartSWR';
+import processPieData from './helper/processPieData';
+
+import handleBtnClick from './helper/handleBtnClick';
+
 
 const PieChart = ({ subheader, chartColors, startDate, endDate, ...other }) => {
   const theme = useTheme();
   // 전체 또는 소 또는 돼지 중 조회할 데이터의 label
   const [label, setLabel] = useState('total_counts');
-
   // pie chart에 나타낼 chart series 값
   const [chartSeries, setChartSeries] = useState([]);
 
@@ -23,8 +26,11 @@ const PieChart = ({ subheader, chartColors, startDate, endDate, ...other }) => {
   const chartOptions = useChart({
     colors: chartColors, // Colors for the chart series.
     labels: CHART_LABLE, // Labels for the chart.
-    stroke: { colors: [theme.palette.background.paper] }, // Stroke colors for the chart.
-    legend: { floating: true, horizontalAlign: 'center' }, // Legend configuration.
+    stroke: {
+      width: 0, // 선의 두께를 0으로 설정
+      colors: [theme.palette.background.paper],
+    }, // Stroke colors for the chart.
+    legend: { floating: true, horizontalAlign: 'center', top: -20 }, // Legend configuration.
     dataLabels: { enabled: true, dropShadow: { enabled: true } }, // Data label configuration
     tooltip: {
       fillSeriesColor: true, // Whether to fill the tooltip with series color.
@@ -36,36 +42,30 @@ const PieChart = ({ subheader, chartColors, startDate, endDate, ...other }) => {
       },
     },
     plotOptions: {
-      pie: { donut: { labels: { show: true } } }, // Plot options for a donut chart. (가운데 설명 표시)
+      pie: {
+        donut: {
+          labels: {
+            show: true,
+            name: {
+              show: true,
+              offsetY: -20, // 이름 위치를 위로 조정
+            },
+          },
+        },
+      },
     },
   });
 
-  // fetch한 JSON 데이터에서 필요한 값 parsing 및 chartSeries에 저장
-  const processPieData = (data) => {
-    setChartSeries([
-      data['total_counts']['raw'],
-      data['total_counts']['processed'],
-    ]);
-  };
-
   // pie chart 데이터 API fetch
-  const { data, isLoading, isError } = usePieChartFetch(startDate, endDate);
-  console.log('pie chart fetch 결과:', data);
+  const { data, isLoading, isError } = useStatisticPieChart(startDate, endDate);
 
   // fetch한 데이터 parsing 함수 호출
   useEffect(() => {
     if (data !== null && data !== undefined) {
-      processPieData(data);
+      processPieData(data, setChartSeries);
     }
+    setLabel('total_counts');
   }, [data]);
-
-  // 토글 버튼 handle (전체, 소, 돼지)
-  const handleBtnClick = (e) => {
-    const value = e.target.value;
-    const chart_series = [data[value]['raw'], data[value]['processed']];
-    setLabel(value);
-    setChartSeries(chart_series);
-  };
 
   return (
     <Card {...other}>
@@ -79,21 +79,21 @@ const PieChart = ({ subheader, chartColors, startDate, endDate, ...other }) => {
           <Button
             variant={label === 'total_counts' ? 'contained' : 'outlined'}
             value="total_counts"
-            onClick={(e) => handleBtnClick(e)}
+            onClick={(e) => handleBtnClick(e, setLabel, setChartSeries, data)}
           >
             전체
           </Button>
           <Button
             variant={label === 'cattle_counts' ? 'contained' : 'outlined'}
             value="cattle_counts"
-            onClick={(e) => handleBtnClick(e)}
+            onClick={(e) => handleBtnClick(e, setLabel, setChartSeries, data)}
           >
             소
           </Button>
           <Button
             variant={label === 'pig_counts' ? 'contained' : 'outlined'}
             value="pig_counts"
-            onClick={(e) => handleBtnClick(e)}
+            onClick={(e) => handleBtnClick(e, setLabel, setChartSeries, data)}
           >
             돼지
           </Button>
@@ -101,7 +101,12 @@ const PieChart = ({ subheader, chartColors, startDate, endDate, ...other }) => {
       </Box>
 
       <StyledChartWrapper dir="ltr" style={{ marginTop: '20px' }}>
-        {chartSeries[0] === 0 && chartSeries[1] === 0 ? (
+        {chartSeries[0] === -1 && chartSeries[1] === -1 ? (
+          // 데이터 불러오기 실패한 경우
+          <div style={style.chartWrapperDiv}>
+            <span>데이터를 불러올 수 없습니다</span>
+          </div>
+        ) : chartSeries[0] === 0 && chartSeries[1] === 0 ? (
           // 데이터가 없는 경우
           <div style={style.chartWrapperDiv}>
             <span>데이터가 존재하지 않습니다</span>

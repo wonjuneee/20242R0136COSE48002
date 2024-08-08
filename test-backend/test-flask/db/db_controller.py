@@ -1,12 +1,10 @@
-import pprint
 from flask import jsonify
 from flask_sqlalchemy import SQLAlchemy
 import requests
 import uuid
-import hashlib
-from sqlalchemy.orm import joinedload, scoped_session, sessionmaker
-from sqlalchemy import func, create_engine
+from sqlalchemy import func
 import json
+from utils import *
 
 from .db_model import *
 
@@ -63,19 +61,30 @@ def decode_id(id, db_session):
     return result["specie_value"], result["primal_value"], result["secondary_value"]
 
 
+def calculate_period(db_session, id):
+    butchery = db_session.query(Meat).get(id).butcheryYmd
+    current = datetime.now()
+
+    diff = current - butchery
+    return diff.days
+
+
 # CREATE
-def create_meat(meat_data: dict, db_session):
-    if meat_data is None:
-        raise Exception("Invalid Meat Data")
-    # 1. Get the ID of the record in the SexType table
-    sex_type = db_session.query(SexInfo).filter_by(value=meat_data.get("sexType")).first()
-    # 2. Get the ID of the record in the GradeNum table
+def create_meat(db_session, meat_data: dict):
+    # 1. SexType 테이블에서 성별 정보 ID 가져오기
+    sex_type = (
+        db_session.query(SexInfo).filter_by(value=meat_data.get("sexType")).first()
+    )
+
+    # 2. GradeNum 테이블에서 등급 정보 ID 가져오기
     grade_num = (
         db_session.query(GradeInfo).filter_by(value=meat_data.get("gradeNum")).first()
     )
-    # 3. meat_data에 없는 필드 추가
-
+    # 3. meat_data에 없는 not null 필드 추가
+    meat_data['createdAt'] = convert2string(datetime.now(), 1)
+    
     # 4, meat_data에 있는 필드 수정
+    meat_data["id"] = meat_data.pop("meatId")
     for field in list(meat_data.keys()):
         if field == "sexType":
             try:
@@ -119,8 +128,6 @@ def create_meat(meat_data: dict, db_session):
 
 
 def create_DeepAging(meat_data: dict):
-    if meat_data is None:
-        raise Exception("Invalid Deep Aging meat_data")
     for field in meat_data.keys():
         item_encoder(meat_data, field)
     meat_data["deepAgingId"] = str(uuid.uuid4())
@@ -131,7 +138,7 @@ def create_DeepAging(meat_data: dict):
     return new_deepAging
 
 
-def create_SensoryEval(meat_data: dict, seqno: int, id: str, deepAgingId: int):
+def create_SensoryEval(db_session, meat_data: dict, sensory_data, seqno, id, userId):
     """
     db: SQLAlchemy db
     freshmeat_data: 모든 필드의 데이터가 문자열로 들어왔다고 가정!!
@@ -140,31 +147,29 @@ def create_SensoryEval(meat_data: dict, seqno: int, id: str, deepAgingId: int):
     probexpt_seqno: 실험(전자혀) 관능 검사 seqno
     type: 0(신규 생성) or 1(기존 수정)
     """
-    if meat_data is None:
-        raise Exception("Invalid Sensory_Evaluate data")
     # 1. freshmeat_data에 없는 필드 추가
     item_encoder(meat_data, "seqno", seqno)
-    item_encoder(meat_data, "id", id)
-    item_encoder(meat_data, "deepAgingId", deepAgingId)
+    meat_data['id'] = id
+    meat_data.pop('meatId')
+    meat_data['period'] = calculate_period(db_session, id)
+    meat_data.pop('sensoryData')
+    meat_data['userId'] = userId
+    
+    for field, val in sensory_data.items():
+        meat_data[field] = val
+
     # 2. freshmeat_data에 있는 필드 수정
     for field in meat_data.keys():
-        if field == "seqno":  # 여기 있어도 걍 입력된걸 써라~
-            pass
-        elif field == "freshmeatId":  # 여기 있어도 걍 입력된걸 써라~
-            pass
-        elif field == "deepAgingId":
-            pass
-        else:
-            item_encoder(meat_data, field)
+        item_encoder(meat_data, field)
     # Create a new Meat object
     try:
-        new_SensoryEval = SensoryEval(**meat_data)
+        new_sensory_eval = SensoryEval(**meat_data)
     except Exception as e:
         raise Exception("Wrong sensory eval DB field items" + str(e))
-    return new_SensoryEval
+    return new_sensory_eval
 
 
-def create_HeatemeatSensoryEval(meat_data: dict, seqno: int, id: str):
+def create_HeatemeatSensoryEval(sensory_data: dict, id: str, seqno: int):
     """
     db: SQLAlchemy db
     heatedmeat_data: 모든 필드의 데이터가 문자열로 들어왔다고 가정!!
@@ -173,309 +178,413 @@ def create_HeatemeatSensoryEval(meat_data: dict, seqno: int, id: str):
     probexpt_seqno: 실험(전자혀) 관능 검사 seqno
     type: 0(신규 생성) or 1(기존 수정)
     """
-    if meat_data is None:
-        raise Exception("Invalid Heatedmeat Sensory Evaluate data")
     # 1. heatedmeat_data에 없는 필드 추가
-    item_encoder(meat_data, "seqno", seqno)
-    item_encoder(meat_data, "id", id)
+    sensory_data["id"] = id
+    sensory_data["seqno"] = seqno
     # 2. heatedmeat_data에 있는 필드 수정
-    for field in meat_data.keys():
-        if field == "seqno":
-            pass
-        elif field == "id":
-            pass
-        else:
-            item_encoder(meat_data, field)
+    for field in sensory_data.keys():
+        item_encoder(sensory_data, field)
+
     # Create a new Meat object
     try:
-        new_heatedmeat = HeatedmeatSensoryEval(**meat_data)
+        new_heatedmeat = HeatedmeatSensoryEval(**sensory_data)
+        return new_heatedmeat
     except Exception as e:
         raise Exception("Wrong heatedmeat sensory eval DB field items" + str(e))
-    return new_heatedmeat
 
 
-def create_ProbexptData(meat_data: dict, seqno: int, id: str):
+def create_ProbexptData(probexpt_data: dict, id: str, seqno: int, is_heated: bool):
     """
     db: SQLAlchemy db
-    heatedmeat_data: 모든 필드의 데이터가 문자열로 들어왔다고 가정!!
-    seqno: 신선육 관능검사 seqno
-    heatedMeatId: 가열육 관능검사 seqno
-    probexpt_seqno: 실험(전자혀) 관능 검사 seqno
-    type: 0(신규 생성) or 1(기존 수정)
+    probexpt_data: 실험실 데이터
+    id: 원육 id
+    seqno: 처리육의 seqno
+    is_heated: 가열/비가열 여부
     """
-    if meat_data is None:
-        raise Exception("Invalid Heatedmeat Sensory Evaluate data")
-    # 1. heatedmeat_data에 없는 필드 추가
-    item_encoder(meat_data, "seqno", seqno)
-    item_encoder(meat_data, "id", id)
-    # 2. heatedmeat_data에 있는 필드 수정
-    for field in meat_data.keys():
-        if field == "seqno":
-            pass
-        elif field == "id":
-            pass
-        else:
-            item_encoder(meat_data, field)
-    # Create a new Meat object
+    # 1. probexpt_data에 없는 필드 추가
+    probexpt_data["id"] = id
+    probexpt_data["seqno"] = seqno
+    probexpt_data["isHeated"] = is_heated
+
+    # 2. probexpt_data에 있는 필드 수정
+    for field in probexpt_data.keys():
+        item_encoder(probexpt_data, field)
+
+    # Create a new Probexpt object
     try:
-        new_probexptdata = ProbexptData(**meat_data)
+        new_probexpt_data = ProbexptData(**probexpt_data)
+        return new_probexpt_data
     except Exception as e:
-        raise Exception("Wrong heatedmeat sensory eval DB field items" + str(e))
-    return new_probexptdata
+        raise Exception("Wrong probexpt data DB field items" + str(e))
 
 
 # API MiddleWare
-def create_specific_std_meat_data(db_session, s3_conn, firestore_conn, data):
-    id = data.get("id")
-    meat = db_session.query(Meat).get(id)
-    if meat:
-        if meat.statusType == 2:
-            raise Exception("No Id in Request Data")
+def create_specific_std_meat_data(
+    db_session, s3_conn, firestore_conn, data, meat_id, is_post
+):
     try:
-        # 1. DB merge
-        new_meat = create_meat(meat_data=data, db_session=db_session)
-        new_meat.statusType = 0
-        db_session.merge(new_meat)
+        if is_post:
+            # 1. DB merge
+            new_meat = create_meat(db_session=db_session, meat_data=data)
+            new_meat.statusType = 0
+            
+            # db_session.add(new_meat)
+            
+            # 2. Firestore -> S3
+            transfer_folder_image(
+                s3_conn=s3_conn,
+                firestore_conn=firestore_conn,
+                db_session=db_session,
+                id=meat_id,
+                new_meat=new_meat,
+                folder="qr_codes",
+            )
 
-        # 2. Firestore -> S3
+        else:
+            existing_meat = db_session.query(Meat).get(meat_id)
+            if existing_meat.statusType == 2:
+                return None
+
+            new_category = (
+                db_session.query(CategoryInfo)
+                .filter(
+                    CategoryInfo.primalValue == data.get("primalValue"),
+                    CategoryInfo.secondaryValue == data.get("secondaryValue"),
+                )
+                .first()
+            )
+            existing_meat.categoryId = new_category.id
+            existing_meat.statusType = 0
+            
+            db_session.merge(existing_meat)
         db_session.commit()
-        transfer_folder_image(
-            s3_conn=s3_conn,
-            firestore_conn=firestore_conn,
-            db_session=db_session,
-            id=id,
-            new_meat=new_meat,
-            folder="qr_codes",
-        )
-        
+
+    except Exception as e:
+        # logger.info(str(e))
+        db_session.rollback()
+        raise e
+
+    return meat_id
+
+
+def create_raw_meat_deep_aging_info(db_session, meat_id, seqno):
+    new_meat = db_session.query(Meat).get(meat_id)
+    new_deep_aging = {
+        "id": meat_id,
+        "seqno": seqno,
+        "date": new_meat.createdAt,
+        "minute": 0,
+    }
+    try:
+        deep_aging_data = DeepAgingInfo(**new_deep_aging)
+        db_session.add(deep_aging_data)
+        db_session.commit()
+        return f"{meat_id}-{seqno}"
     except Exception as e:
         db_session.rollback()
         raise e
-    return jsonify(id)
 
 
-def create_specific_deep_aging_meat_data(db_session, s3_conn, firestore_conn, data):
+def create_specific_deep_aging_data(db_session, data):
     # 2. 기본 데이터 받아두기
-    id = data.get("id")
-    seqno = data.get("seqno")
-    deepAging_data = data.get("deepAging")
-    data.pop("deepAging", None)
-    meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
-    if id == None:  # 1. 애초에 id가 없는 request
-        raise Exception("No Id in Request Data")
-    sensory_eval = (
-        db_session.query(SensoryEval).filter_by(id=id, seqno=seqno).first()
-    )  # DB에 있는 육류 정보
-    try:
-        if deepAging_data is not None:
-            if meat:  # 승인 정보 확인
-                if meat.statusType != 2:
-                    raise Exception("Not Confirmed Meat Data")
-            if sensory_eval:  # 기존 Deep Aging을 수정하는 경우
-                deepAgingId = sensory_eval.deepAgingId
-                existing_DeepAging = db_session.query(DeepAgingInfo).get(deepAgingId)
-                if existing_DeepAging:
-                    for key, value in deepAging_data.items():
-                        setattr(existing_DeepAging, key, value)
-                    # for key, value in data.items():
-                    #     setattr(sensory_eval, key, value)
-                    new_SensoryEval = create_SensoryEval(data, seqno, id, deepAgingId)
-                    db_session.merge(new_SensoryEval)
-                else:
-                    raise Exception("No Deep Aging Data found for update")
-            else:  # 새로운 Deep aging을 추가하는 경우
-                new_DeepAging = create_DeepAging(deepAging_data)
-                deepAgingId = new_DeepAging.deepAgingId
-                db_session.add(new_DeepAging)
-                db_session.commit()
-                new_SensoryEval = create_SensoryEval(data, seqno, id, deepAgingId)
-                db_session.merge(new_SensoryEval)
+    id = data["meatId"]
+    seqno = data["seqno"]
 
+    meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
+    deep_aging = (
+        db_session.query(DeepAgingInfo).filter_by(id=id, seqno=seqno).first()
+    )  # DB에 있는 딥에이징 정보
+    if not meat:
+        return None
+    if deep_aging:
+        return False
+
+    new_deep_aging = {
+        "id": id,
+        "seqno": seqno,
+        "date": data["deepAging"]["date"],
+        "minute": data["deepAging"]["minute"],
+    }
+    try:
+        deep_aging_data = DeepAgingInfo(**new_deep_aging)
+        db_session.add(deep_aging_data)
+        db_session.commit()
+        return f"{id}-{seqno}"
+    except Exception as e:
+        db_session.rollback()
+        raise e
+
+
+def create_specific_sensory_eval(db_session, s3_conn, firestore_conn, data, is_post):
+    # 기본 데이터 받아오기
+    meat_id = safe_str(data.get("meatId"))
+    seqno = safe_int(data.get("seqno"))
+    need_img = safe_bool(data.get("imgAdded"))
+    data.pop("imgAdded")
+    sensory_data = data.get("sensoryData")
+
+    # meat_id가 넘어오지 않았을 때 / 없는 meat_id일 때
+    if not meat_id:
+        return {"msg": "No Meat ID data sent", "code": 400}
+
+    meat = db_session.query(Meat).get(meat_id)
+    if not meat:
+        return {"msg": "Meat Data Does Not Exist", "code": 400}
+
+    # 해당 회차의 deepAging_info 레코드가 존재하는지 확인
+    deep_aging = (
+        db_session.query(DeepAgingInfo).filter_by(id=meat_id, seqno=seqno).first()
+    )
+    if not deep_aging:
+        return {"msg": "Deep Aging Info Does Not Exist", "code": 400}
+
+    existing_sensory = (
+        db_session.query(SensoryEval).filter_by(id=meat_id, seqno=seqno).first()
+    )
+    # POST 요청
+    try:
+        if is_post:
+            # 기존 관능 평가 데이터가 존재할 때 에러 처리
+            if existing_sensory:
+                return {
+                    "msg": f"Sensory Evaluation Already Exists {meat_id}-{seqno}",
+                    "code": 400,
+                }
+
+            user_id = safe_str(data.get("userId"))
+            # sensory_eval 생성
+            sensory_data["createdAt"] = convert2string(datetime.now(), 1)
+            new_sensory_eval = create_SensoryEval(db_session, data, sensory_data, seqno, meat_id, user_id)
+            # db_session.add(new_sensory_eval)
+
+            if need_img:
+                transfer_folder_image(
+                    s3_conn,
+                    firestore_conn,
+                    db_session,
+                    f"{meat_id}-{seqno}",
+                    new_sensory_eval,
+                    "sensory_evals",
+                )
+            else:
+                db_session.add(new_sensory_eval)
             db_session.commit()
+            return {"msg": f"Success to Create Sensory Evaluation {meat_id}-{seqno}", "code": 200}
+        # PATCH 요청
+        else:
+            # 기존 관능 평가 데이터가 존재하지 않을 때 에러 처리
+            if not existing_sensory:
+                return {
+                    "msg": f"Sensory Evaluation Does Not Exist {meat_id}-{seqno}",
+                    "code": 400,
+                }
+
+            existing_user = existing_sensory.userId
+            if seqno == 0:
+                if meat.statusType == 2:
+                    return {"msg": "Already Confirmed Meat", "code": 400}
+                meat.statusType = 0
+                db_session.merge(meat)
+                
+            # sensory_eval 생성
+            sensory_data["createdAt"] = convert2string(existing_sensory.createdAt, 1)
+            new_sensory_eval = create_SensoryEval(db_session, data, sensory_data, seqno, meat_id, existing_user)
+            # db_session.merge(new_sensory_eval)
+
+            if need_img:
+                transfer_folder_image(
+                    s3_conn,
+                    firestore_conn,
+                    db_session,
+                    f"{meat_id}-{seqno}",
+                    new_sensory_eval,
+                    "sensory_evals",
+                )
+            else:
+                db_session.merge(new_sensory_eval)
+            db_session.commit()
+            return {"msg": f"Success to Update Sensory Evaluation {meat_id}-{seqno}", "code": 200}
+            
+    except Exception as e:
+        db_session.rollback()
+        raise e
+
+
+def create_specific_heatedmeat_seonsory_eval(
+    db_session, firestore_conn, s3_conn, data, is_post
+):
+    # 2. 기본 데이터 받아두기
+    id = data["meatId"]
+    seqno = data["seqno"]
+    need_img = data["imgAdded"]
+
+    meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
+    deep_aging_info = get_DeepAging(db_session, id, seqno)
+    if not (meat and deep_aging_info):
+        return {"msg": "Meat or Deep Aging Data Does NOT Exists", "code": 400}
+
+    try:
+        sensory_data = data["heatedmeatSensoryData"]
+        sensory_data["filmedAt"] = data["filmedAt"]
+        existed_sensory_data = get_HeatedmeatSensoryEval(db_session, id, seqno)
+
+        if existed_sensory_data: # 수정
+            if is_post: # 수정인데 POST 메서드
+                return ({"msg": "Heatedmeat Sensory Data Already Exists", "code": 400})
+            
+            if meat.statusType != 2:
+                return ({"msg": "Not Confirmed Data", "code": 400})
+
+            sensory_data["userId"] = existed_sensory_data["userId"]
+            sensory_data["createdAt"] = existed_sensory_data["createdAt"]
+            sensory_data["period"] = existed_sensory_data["period"]
+            sensory_data["tenderness"] = {**existed_sensory_data["tenderness"], **sensory_data["tenderness"]}
+            new_sensory_data = create_HeatemeatSensoryEval(sensory_data, id, seqno)
+            # db_session.merge(new_sensory_data)
+
+        else: # 생성
+            if not is_post: # 생성인데 PATCH 메서드
+                return ({"msg": "Heatedmeat Sensory Data Does NOT Exists", "code": 400})
+            sensory_data["userId"] = data["userId"]
+            sensory_data["createdAt"] = convert2string(datetime.now(), 1)
+            sensory_data["period"] = calculate_period(db_session, id)
+            new_sensory_data = create_HeatemeatSensoryEval(sensory_data, id, seqno)
+
+            # db_session.add(new_sensory_data)
+
+        if need_img:
             transfer_folder_image(
                 s3_conn,
                 firestore_conn,
                 db_session,
                 f"{id}-{seqno}",
-                new_SensoryEval,
-                "sensory_evals",
+                new_sensory_data,
+                "heatedmeat_sensory_evals",
             )
-            
         else:
-            raise Exception("No deepaging data in request")
+            db_session.merge(new_sensory_data)
+        db_session.commit()
+        return {
+            "msg": f"Success to {'POST' if is_post else 'PATCH'} Heatedmeat Sensory Data {id}-{seqno}",
+            "code": 200,
+        }
     except Exception as e:
         db_session.rollback()
         raise e
-    return jsonify(id)
 
 
-def create_specific_sensoryEval(db_session, s3_conn, firestore_conn, data):
+def create_specific_probexpt_data(db_session, data, is_post):
     # 2. 기본 데이터 받아두기
-    id = safe_str(data.get("id"))
-    seqno = safe_int(data.get("seqno"))
-    deepAging_data = data.get("deepAging")
-    data.pop("deepAging", None)
-    meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
-    if id == None:  # 1. 애초에 id가 없는 request
-        raise Exception("No ID data sent for update")
+    id = data["meatId"]
+    seqno = data["seqno"]
+    is_heated = data["isHeated"]
 
-    sensory_eval = (
-        db_session.query(SensoryEval).filter_by(id=id, seqno=seqno).first()
-    )  # DB에 있는 육류 정보
+    meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
+    deep_aging_info = get_DeepAging(db_session, id, seqno)
+    if not (meat and deep_aging_info):
+        return {"msg": "Meat or Deep Aging Data Does NOT Exists", "code": 400}
+
     try:
-        if seqno != 0:  # 가공육 관능검사
-            if sensory_eval:  # 기존 Deep Aging을 수정하는 경우
-                deepAgingId = sensory_eval.deepAgingId
-                new_SensoryEval = create_SensoryEval(data, seqno, id, deepAgingId)
-                db_session.merge(new_SensoryEval)
-            else:  # 새로운 Deep aging을 추가하는 경우
-                new_DeepAging = create_DeepAging(deepAging_data)
-                deepAgingId = new_DeepAging.deepAgingId
-                db_session.add(new_DeepAging)
-                db_session.commit()
-                new_SensoryEval = create_SensoryEval(data, seqno, id, deepAgingId)
-                db_session.merge(new_SensoryEval)
-        else:  # 신선육 관능검사
-            if meat:  # 수정하는 경우
-                if meat.statusType == 2:
-                    raise Exception("Already confirmed meat data")
-                meat.statusType = 0
-                db_session.merge(meat)
-            deepAgingId = None
-            new_SensoryEval = create_SensoryEval(data, seqno, id, deepAgingId)
-            db_session.merge(new_SensoryEval)
+        probexpt_data = data["probexptData"]
+        existed_probexpt_data = get_ProbexptData(db_session, id, seqno, is_heated)
+
+        if existed_probexpt_data: # 수정
+            if is_post: # 수정이지만 POST 메서드
+                return ({"msg": "Probexpt Data Already Exists", "code": 400})
             
-        db_session.commit()
-        transfer_folder_image(
-            s3_conn,
-            firestore_conn,
-            db_session,
-            f"{id}-{seqno}",
-            new_SensoryEval,
-            "sensory_evals",
-        )
-    except Exception as e:
-        db_session.rollback()
-        logger.exception(str(e))
-        raise e
-    return jsonify(id)
+            if meat.statusType != 2:
+                return ({"msg": "Not Confirmed Data", "code": 400})
 
-
-def create_specific_heatedmeat_seonsory_data(db_session, data):
-    # 2. 기본 데이터 받아두기
-    id = safe_str(data.get("id"))
-    seqno = safe_int(data.get("seqno"))
-    meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
-    if meat:  # 승인 정보 확인
-        if meat.statusType != 2:
-            raise Exception("Not confirmed meat data")
-    if id == None:  # 1. 애초에 id가 없는 request
-        raise Exception("No ID data sent for update")
-    try:
-        new_HeatedmeatSensoryEval = create_HeatemeatSensoryEval(data, seqno, id)
-        db_session.merge(new_HeatedmeatSensoryEval)
-        db_session.commit()
+            probexpt_data["userId"] = existed_probexpt_data["userId"]
+            probexpt_data["createdAt"] = existed_probexpt_data["createdAt"]
+            new_probexpt_data = create_ProbexptData(probexpt_data, id, seqno, is_heated)
+            db_session.merge(new_probexpt_data)
+            db_session.commit()
+            return {
+                "msg": f"Success to PATCH Probexpt Data {id}-{seqno}-{'heated' if is_heated else 'unheated'}",
+                "code": 200,
+            }
+        else:  # 생성
+            if not is_post:  # 생성이지만 PATCH 메서드
+                return {"msg": "Probexpt Data Does NOT Exists", "code": 400}
+            probexpt_data["userId"] = data["userId"]
+            probexpt_data["createdAt"] = convert2string(datetime.now(), 1)
+            probexpt_data["period"] = calculate_period(db_session, id)
+            new_probexpt_data = create_ProbexptData(probexpt_data, id, seqno, is_heated)
+            db_session.add(new_probexpt_data)
+            db_session.commit()
+            return {
+                "msg": f"Success to POST Probexpt Data {id}-{seqno}-{'heated' if is_heated else 'unheated'}",
+                "code": 200,
+            }
     except Exception as e:
         db_session.rollback()
         raise e
-    return jsonify(id)
-
-
-def create_specific_probexpt_data(db_session, data):
-    # 2. 기본 데이터 받아두기
-    id = safe_str(data.get("id"))
-    seqno = safe_int(data.get("seqno"))
-    meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
-    if meat:  # 승인 정보 확인
-        if meat.statusType != 2:
-            raise Exception("Not confirmed meat data")
-    if id == None:  # 1. 애초에 id가 없는 request
-        raise Exception("No ID data sent for update")
-    try:
-        new_ProbexptData = create_ProbexptData(data, seqno, id)
-        db_session.merge(new_ProbexptData)
-        db_session.commit()
-    except Exception as e:
-        db_session.rollback()
-        raise e
-    return jsonify(id)
 
 
 # GET
 def get_meat(db_session, id):
-    # 1. 육류데이터 가져오기
-    meat = db_session.query(Meat).filter(Meat.id == id).first()
+    # 1. 원육 데이터 조회
+    meat = db_session.query(Meat).filter_by(id=id).first()
 
     if meat is None:
+        db_session.close()
         return None
     result = to_dict(meat)
-    sexType = db_session.query(SexInfo).filter(SexInfo.id == result["sexType"]).first()
-    gradeNum = (
-        db_session.query(GradeInfo).filter(GradeInfo.id == result["gradeNum"]).first()
-    )
-    statusType = (
-        db_session.query(StatusInfo)
-        .filter(StatusInfo.id == result["statusType"])
-        .first()
-    )
-    # 이미 있는거 변환
+    result["meatId"] = result.pop("id")
+    sexType = db_session.query(SexInfo).filter_by(id=result["sexType"]).first()
+    gradeNum = db_session.query(GradeInfo).filter_by(id=result["gradeNum"]).first()
+    statusType = db_session.query(StatusInfo).filter_by(id=result["statusType"]).first()
+
+    # 2. 참조관계 또는 날짜 데이터 형식 변환
     result["sexType"] = sexType.value
     (
         result["specieValue"],
         result["primalValue"],
         result["secondaryValue"],
     ) = decode_id(result["categoryId"], db_session)
+    del result["categoryId"]
+
     result["gradeNum"] = gradeNum.value
     result["statusType"] = statusType.value
     result["createdAt"] = convert2string(result["createdAt"], 1)
+    result["updatedAt"] = convert2string(result["updatedAt"], 1)
     result["butcheryYmd"] = convert2string(result["butcheryYmd"], 2)
     result["birthYmd"] = convert2string(result["birthYmd"], 2)
 
-    # 6. freshmeat , heatedmeat, probexpt
-    result["rawmeat"] = {
-        "sensory_eval": get_SensoryEval(db_session=db_session, id=id, seqno=0),
-        "heatedmeat_sensory_eval": get_HeatedmeatSensoryEval(
-            db_session=db_session, id=id, seqno=0
-        ),
-        "probexpt_data": get_ProbexptData(db_session=db_session, id=id, seqno=0),
-    }
-    sensory_data = (
-        db_session.query(SensoryEval)
-        .filter_by(id=id)
-        .order_by(SensoryEval.seqno.desc())
-        .first()
-    )  # DB에 있는 육류 정보
-    if sensory_data:
-        N = sensory_data.seqno
-    else:
-        N = 0
+    # 3. 유저 정보 추가
+    user = get_user(db_session, meat.userId)
+    result["userName"] = user.name
+    result["userType"] = usrType[user.type]
+    result["company"] = user.company
 
-    result["processedmeat"] = {
-        f"{i}회": {
-            "sensory_eval": {},
-            "heatedmeat_sensory_eval": {},
-            "probexpt_data": {},
-        }
-        for i in range(1, N + 1)
-    }
-    for index in range(1, N + 1):
-        result["processedmeat"][f"{index}회"]["sensory_eval"] = get_SensoryEval(
-            db_session, id, index
-        )
-        result["processedmeat"][f"{index}회"]["heatedmeat_sensory_eval"] = (
-            get_HeatedmeatSensoryEval(db_session, id, index)
-        )
-        result["processedmeat"][f"{index}회"]["probexpt_data"] = get_ProbexptData(
-            db_session, id, index
-        )
-
-    # remove field
-    del result["categoryId"]
+    # 4. 딥에이징 정보 - 관능데이터, 실험실데이터
+    number_of_deep_aging_data = (
+        db_session.query(func.max(DeepAgingInfo.seqno)).filter_by(id=id).scalar()
+    )
+    if number_of_deep_aging_data is None:
+        number_of_deep_aging_data = -1
+    result["deepAgingInfo"] = []
+    for sequence in range(0, number_of_deep_aging_data + 1):
+        deep_aging_data = get_DeepAging(db_session, id, sequence)
+        if not deep_aging_data:
+            continue
+        result["deepAgingInfo"].append({
+            "date": convert2string(deep_aging_data.date, 2) if sequence != 0 and deep_aging_data else None,
+            "minute": deep_aging_data.minute if sequence != 0 and deep_aging_data else None,
+            "seqno": f"{sequence}",
+            "sensory_eval": get_SensoryEval(db_session, id, sequence),
+            "heatedmeat_sensory_eval": get_HeatedmeatSensoryEval(db_session, id, sequence),
+            "probexpt_data": get_ProbexptData(db_session, id, sequence, False),
+            "heatedmeat_probexpt_data": get_ProbexptData(db_session, id, sequence, True),
+        })
+        
+    db_session.close()
     return result
 
 
 def get_SensoryEval(db_session, id, seqno):
-    sensoryEval_data = (
+    sensory_eval_data = (
         db_session.query(SensoryEval)
         .filter(
             SensoryEval.id == id,
@@ -483,37 +592,35 @@ def get_SensoryEval(db_session, id, seqno):
         )
         .first()
     )
-    if sensoryEval_data:
-        sensoryEval = to_dict(sensoryEval_data)
-        sensoryEval["createdAt"] = convert2string(sensoryEval["createdAt"], 1)
-        if seqno != 0:  # 가공육인 경우
-            sensoryEval["deepaging_data"] = get_DeepAging(
-                db_session, sensoryEval["deepAgingId"]
-            )
-            del sensoryEval["deepAgingId"]
-        return sensoryEval
+    if sensory_eval_data:
+        sensory_eval = to_dict(sensory_eval_data)
+        sensory_eval["meatId"] = sensory_eval.pop("id")
+        sensory_eval["filmedAt"] = convert2string(sensory_eval["filmedAt"], 1)
+        sensory_eval["createdAt"] = convert2string(sensory_eval["createdAt"], 1)
+        sensory_eval["userName"] = get_user(db_session, sensory_eval["userId"]).name
+        
+        db_session.close()
+        return sensory_eval
     else:
+        db_session.close()
         return None
 
 
-def get_DeepAging(db_session, id):
-    deepAging_data = (
+def get_DeepAging(db_session, id, seqno):
+    deep_aging_data = (
         db_session.query(DeepAgingInfo)
         .filter(
-            DeepAgingInfo.deepAgingId == id,
+            DeepAgingInfo.id == id,
+            DeepAgingInfo.seqno == seqno,
         )
         .first()
     )
-    if deepAging_data:
-        deepAging_history = to_dict(deepAging_data)
-        deepAging_history["date"] = convert2string(deepAging_history.get("date"), 2)
-        return deepAging_history
-    else:
-        return None
+    db_session.close()
+    return deep_aging_data
 
 
 def get_HeatedmeatSensoryEval(db_session, id, seqno):
-    heated_meat = (
+    heated_meat_data = (
         db_session.query(HeatedmeatSensoryEval)
         .filter(
             HeatedmeatSensoryEval.id == id,
@@ -521,31 +628,42 @@ def get_HeatedmeatSensoryEval(db_session, id, seqno):
         )
         .first()
     )
-    if heated_meat:
-        heated_meat_history = to_dict(heated_meat)
-        heated_meat_history["createdAt"] = convert2string(
-            heated_meat_history["createdAt"], 1
-        )
-        del heated_meat_history["imagePath"]
-        return heated_meat_history
+    if heated_meat_data:
+        heated_meat = to_dict(heated_meat_data)
+        heated_meat["meatId"] = heated_meat.pop("id")
+        heated_meat["filmedAt"] = convert2string(heated_meat["filmedAt"], 1)
+        heated_meat["createdAt"] = convert2string(heated_meat["createdAt"], 1)
+        heated_meat["userName"] = get_user(db_session, heated_meat["userId"]).name
+        # del heated_meat["imagePath"]
+        
+        db_session.close()
+        return heated_meat
     else:
+        db_session.close()
         return None
 
 
-def get_ProbexptData(db_session, id, seqno):
-    probexpt = (
+def get_ProbexptData(db_session, id, seqno, is_heated):
+    probexpt_data = (
         db_session.query(ProbexptData)
         .filter(
             ProbexptData.id == id,
             ProbexptData.seqno == seqno,
+            ProbexptData.isHeated == is_heated,
         )
         .first()
     )
-    if probexpt:
-        probexpt_history = to_dict(probexpt)
-        probexpt_history["updatedAt"] = convert2string(probexpt_history["updatedAt"], 1)
-        return probexpt_history
+    if probexpt_data:
+        probexpt = to_dict(probexpt_data)
+        probexpt["meatId"] = probexpt.pop("id")
+        probexpt["createdAt"] = convert2string(probexpt["createdAt"], 1)
+        probexpt["userName"] = get_user(db_session, probexpt["userId"]).name
+        del probexpt["isHeated"]
+        
+        db_session.close()
+        return probexpt
     else:
+        db_session.close()
         return None
 
 
@@ -555,6 +673,7 @@ def get_range_meat_data(
     count,
     start=None,
     end=None,
+    specie_value=None,
     farmAddr=None,
     userId=None,
     type=None,
@@ -562,57 +681,59 @@ def get_range_meat_data(
     statusType=None,
     company=None,
 ):
-    count = safe_int(count)
-    offset = safe_int(offset)
-    offset = offset*count
-    
+    if (count is not None) and (offset is not None):
+        count = safe_int(count)
+        offset = safe_int(offset)
+        offset = offset * count
     start = convert2datetime(start, 0)
     end = convert2datetime(end, 0)
+
     # Base Query
-    query = db_session.query(Meat).join(
-        User, User.userId == Meat.userId
-    )  # Join with User
-    
+    query = db_session.query(Meat)
+
+    if specie_value != 2:
+        query = query.join(CategoryInfo).filter(CategoryInfo.speciesId == specie_value)
+
     # Sorting and Filtering
-    if farmAddr is not None:
-        if farmAddr:  # true: 가나다순 정렬
-            query = query.order_by(Meat.farmAddr.asc())
-        else:  # false: 역순
-            query = query.order_by(Meat.farmAddr.desc())
-    if userId is not None:
-        if userId:  # true: 알파벳 오름차순 정렬
-            query = query.order_by(Meat.userId.asc())
-        else:  # false: 알파벳 내림차순 정렬
-            query = query.order_by(Meat.userId.desc())
-    if type is not None:
-        if type:  # true: 숫자 오름차순 정렬
-            query = query.order_by(User.type.asc())
-        else:  # false: 숫자 내림차순 정렬
-            query = query.order_by(User.type.desc())
-    if company is not None:
-        if company:  # true: 가나다순 정렬
-            query = query.order_by(User.company.asc())
-        else:  # false: 역순
-            query = query.order_by(User.company.desc())
-    if createdAt is not None:
-        if createdAt:  # true: 최신순
-            query = query.order_by(Meat.createdAt.desc())
-        else:  # false: 역순
-            query = query.order_by(Meat.createdAt.asc())
-    if statusType is not None:
-        if statusType:  # true: 숫자 오름차순 정렬
-            query = query.order_by(Meat.statusType.asc())
-        else:  # false: 숫자 내림차순 정렬
-            query = query.order_by(Meat.statusType.desc())
+    # if farmAddr is not None:
+    #     if farmAddr:  # true: 가나다순 정렬
+    #         query = query.order_by(Meat.farmAddr.asc())
+    #     else:  # false: 역순
+    #         query = query.order_by(Meat.farmAddr.desc())
+    # if userId is not None:
+    #     if userId:  # true: 알파벳 오름차순 정렬
+    #         query = query.order_by(Meat.userId.asc())
+    #     else:  # false: 알파벳 내림차순 정렬
+    #         query = query.order_by(Meat.userId.desc())
+    # if type is not None:
+    #     if type:  # true: 숫자 오름차순 정렬
+    #         query = query.order_by(User.type.asc())
+    #     else:  # false: 숫자 내림차순 정렬
+    #         query = query.order_by(User.type.desc())
+    # if company is not None:
+    #     if company:  # true: 가나다순 정렬
+    #         query = query.order_by(User.company.asc())
+    #     else:  # false: 역순
+    #         query = query.order_by(User.company.desc())
+    # if createdAt is not None:
+    #     if createdAt:  # true: 최신순
+    #         query = query.order_by(Meat.createdAt.desc())
+    #     else:  # false: 역순
+    #         query = query.order_by(Meat.createdAt.asc())
+    # if statusType is not None:
+    #     if statusType:  # true: 숫자 오름차순 정렬
+    #         query = query.order_by(Meat.statusType.asc())
+    #     else:  # false: 숫자 내림차순 정렬
+    #         query = query.order_by(Meat.statusType.desc())
 
     # 기간 설정 쿼리
-    db_total_len = db_session.query(Meat).count()
+    db_total_len = query.count()
     if start is not None and end is not None:
         query = query.filter(Meat.createdAt.between(start, end))
-        db_total_len = db_session.query(Meat).filter(
-            Meat.createdAt.between(start, end)
-        ).count()
-    query = query.offset(offset).limit(count)
+        db_total_len = query.filter(Meat.createdAt.between(start, end)).count()
+    query = query.order_by(Meat.createdAt.desc())
+    if (count is not None) and (offset is not None):
+        query = query.offset(offset).limit(count)
 
     # 탐색
     meat_data = query.all()
@@ -622,39 +743,47 @@ def get_range_meat_data(
         meat_result[id] = get_meat(db_session, id)
         userTemp = get_user(db_session, meat_result[id].get("userId"))
         if userTemp:
-            meat_result[id]["name"] = userTemp.get("name")
-            meat_result[id]["company"] = userTemp.get("company")
-            meat_result[id]["type"] = userTemp.get("type")
+            meat_result[id]["userName"] = userTemp.name
+            meat_result[id]["company"] = userTemp.company
+            meat_result[id]["userType"] = usrType[userTemp.type]
         else:
-            meat_result[id]["name"] = userTemp
+            meat_result[id]["userName"] = userTemp
             meat_result[id]["company"] = userTemp
-            meat_result[id]["type"] = userTemp
-        del meat_result[id]["processedmeat"]
-        del meat_result[id]["rawmeat"]
+            meat_result[id]["userType"] = userTemp
+        del meat_result[id]["deepAgingInfo"]
 
     result = {
         "DB Total len": db_total_len,
         "id_list": id_result,
         "meat_dict": meat_result,
     }
-
-    return jsonify(result)
+    
+    db_session.close()
+    return result
 
 
 # UPDATE
 
+
 # DELETE
+def delete_user(db_session, user):
+    try:
+        # 로컬 데이터베이스에서 유저 삭제
+        db_session.delete(user)
+        db_session.commit()
+    except Exception as e:
+        db_session.rollback()
+        raise Exception(str(e))
 
 
 # USER
 def create_user(db_session, user_data: dict):
     try:
+        user_data['createdAt'] = convert2string(datetime.now(), 1)
+        user_data['updatedAt'] = convert2string(datetime.now(), 1)
+        user_data['loginAt'] = ''
         for field, value in user_data.items():
-            if field == "password":
-                item_encoder(
-                    user_data, field, hashlib.sha256(value.encode()).hexdigest()
-                )
-            elif field == "type":
+            if field == "type":
                 user_type = db_session.query(UserTypeInfo).filter_by(name=value).first()
                 if user_type:  # check if user_type exists
                     item_encoder(user_data, field, user_type.id)
@@ -663,27 +792,25 @@ def create_user(db_session, user_data: dict):
             else:
                 item_encoder(user_data, field)
         new_user = User(**user_data)
-        return new_user
+
+        db_session.add(new_user)
+        db_session.commit()
     except Exception as e:
+        db_session.rollback()
         raise Exception(str(e))
 
 
 def update_user(db_session, user_data: dict):
     try:
-        history = (
-            db_session.query(User).filter_by(userId=user_data.get("userId")).first()
-        )
+        user_id = user_data.get("userId")
+        history = db_session.query(User).filter_by(userId=user_id).first()
         # 1. 기존 유저 없음
-        if history == None:
-            raise Exception(f"No User ID {user_data.get('userId')}")
+        if not history:
+            return jsonify({"message": f"No User ID {user_id}"}), 400
 
         # 2. 기존 유저 있음
         for field, value in user_data.items():
-            if field == "password":
-                item_encoder(
-                    user_data, field, hashlib.sha256(value.encode()).hexdigest()
-                )
-            elif field == "type":
+            if field == "type":
                 user_type = db_session.query(UserTypeInfo).filter_by(name=value).first()
                 if user_type:  # check if user_type exists
                     item_encoder(user_data, field, user_type.id)
@@ -695,28 +822,41 @@ def update_user(db_session, user_data: dict):
 
         for attr, value in user_data.items():
             setattr(history, attr, value)
+
+        db_session.merge(history)
+        db_session.commit()
         return history
 
     except Exception as e:
+        db_session.rollback()
         raise Exception(str(e))
 
 
-def get_user(db_session, userId):
+def get_all_user(db_session):
     try:
-        userData = db_session.query(User).filter(User.userId == userId).first()
-        userData_dict = to_dict(userData)
-        userData_dict["createdAt"] = convert2string(userData_dict.get("createdAt"), 1)
-        userData_dict["updatedAt"] = convert2string(userData_dict.get("updatedAt"), 1)
-        userData_dict["loginAt"] = convert2string(userData_dict.get("loginAt"), 1)
-        userData_dict["type"] = (
-            db_session.query(UserTypeInfo)
-            .filter(UserTypeInfo.id == userData_dict.get("type"))
-            .first()
-            .name
-        )
-        return userData_dict
-
+        users = db_session.query(User).all()
+        for user in users:
+            time = convert2datetime(user.createdAt, 1)
+            user.createdAt = convert2string(time, 0)
+        
+        db_session.close()
+        return users
     except Exception as e:
+        db_session.close()
+        raise Exception(str(e))
+
+
+def get_user(db_session, user_id):
+    try:
+        user_data = db_session.query(User).filter(User.userId == user_id).first()
+        if user_data is not None:
+            time = convert2datetime(user_data.createdAt, 1)
+            user_data.createdAt = convert2string(time, 0)
+        
+        db_session.close()
+        return user_data
+    except Exception as e:
+        db_session.close()
         raise Exception(str(e))
 
 
@@ -746,24 +886,47 @@ def _get_users_by_type(db_session):
 
             # UserType에 해당하는 key의 value 리스트에 유저 id 추가
             user_dict[user_type].append(user.userId)
-
+        
+        db_session.close()
         return user_dict
     except Exception as e:
+        db_session.close()
         raise Exception(str(e))
 
 
-def _getMeatDataByUserId(db_session, userId):
-    meats = db_session.query(Meat).filter_by(userId=userId).all()
-    if meats:
+def _getMeatDataByUserId(db_session, userId, offset, count, start, end):
+    try:
+        start = convert2datetime(start, 0)
+        end = convert2datetime(end, 0)
+        meats = (
+            db_session.query(Meat, CategoryInfo.speciesId)
+            .join(CategoryInfo, CategoryInfo.id == Meat.categoryId)
+            .filter(
+                Meat.userId == userId,
+                Meat.createdAt.between(start, end)
+            )
+            .order_by(Meat.createdAt.desc())
+            .offset(offset).limit(count)
+            .all()
+        )
+
         result = []
-        for meat in meats:
-            temp = get_meat(db_session, meat.id)
-            del temp["processedmeat"]
-            del temp["rawmeat"]
-            result.append(temp)
-        return jsonify(result), 200
-    else:
-        return jsonify({"message": "No meats found for the given userId."}), 404
+        if meats:
+            for meat in meats:
+                meat_obj, specie_id = meat
+                result.append({
+                    "meatId": meat_obj.id,
+                    "createdAt": convert2string(meat_obj.createdAt, 1),
+                    "updatedAt": convert2string(meat_obj.updatedAt, 1),
+                    "statusType": statusType[meat_obj.statusType],
+                    "specieValue": species[specie_id]
+                })
+                
+        db_session.close()    
+        return {"meat_dict": result}
+    except Exception as e:
+        db_session.close()
+        raise Exception(str(e))
 
 
 def _getMeatDataByUserType(db_session, userType):
@@ -787,16 +950,18 @@ def _getMeatDataByUserType(db_session, userType):
         result = []
         for meat in meats:
             temp = get_meat(db_session, meat.id)
-            userTemp = get_user(db_session, temp.get("userId"))
-            if userTemp:
-                temp["name"] = userTemp.get("name")
+            user_temp = get_user(db_session, temp.get("userId"))
+            if user_temp:
+                temp["name"] = user_temp.get("name")
             else:
-                temp["name"] = userTemp
+                temp["name"] = user_temp
             del temp["processedmeat"]
             del temp["rawmeat"]
             result.append(temp)
+        db_session.close()
         return jsonify(result), 200
     else:
+        db_session.close()
         return (
             jsonify({"message": "No meats found for the given userType."}),
             404,
@@ -818,33 +983,35 @@ def _getMeatDataByStatusType(db_session, varified):
         del temp["rawmeat"]
         if temp.get("statusType") == varified:
             meat_list.append(temp)
+    db_session.close()
     return jsonify({f"{varified}": meat_list}), 200
 
 
 def _getMeatDataByRangeStatusType(
-    db_session, varified, offset, count, start=None, end=None
+    db_session, status_type, offset, count, specie_value, start=None, end=None
 ):
+    status_type = safe_int(status_type)
     offset = safe_int(offset)
     count = safe_int(count)
-    # Base query
-    query = (
-        db_session.query(Meat)
-        .options()
-        .filter_by(statusType=varified)
-        .order_by(Meat.createdAt.desc())
-    )
+    # Specie_value별로 Base query를 다르게 설정 - 소, 돼지, 전체
+    if specie_value == "소":
+        query = db_session.query(Meat).filter(
+            Meat.statusType == status_type, Meat.categoryId < 100
+        )
+    elif specie_value == "돼지":
+        query = db_session.query(Meat).filter(
+            Meat.statusType == status_type, Meat.categoryId >= 100
+        )
+    else:
+        query = db_session.query(Meat).filter(Meat.statusType == status_type)
 
     # Date Filter
-    #db_total_len = db_session.query(Meat).count()
-    if start is not None and end is not None:
-        query = query.filter(
-            Meat.createdAt.between(start, end),
-            Meat.statusType == 1
+    if start and end:
+        query = query.filter(Meat.createdAt.between(start, end)).order_by(
+            Meat.createdAt.desc()
         )
-        db_total_len = db_session.query(Meat).filter(
-            Meat.createdAt.between(start, end),
-            Meat.statusType == varified
-        ).count()
+
+        db_total_len = query.count()
     query = query.offset(offset * count).limit(count)
 
     result = []
@@ -852,30 +1019,32 @@ def _getMeatDataByRangeStatusType(
 
     for meat in meat_data:
         temp = get_meat(db_session, meat.id)
-        userTemp = get_user(db_session, temp.get("userId"))
-        if userTemp:
-            temp["name"] = userTemp.get("name")
-            temp["company"] = userTemp.get("company")
-            temp["type"] = userTemp.get("type")
+        user_temp = get_user(db_session, temp["userId"])
+
+        if user_temp:
+            temp["userName"] = user_temp.name
+            temp["company"] = user_temp.company
+            temp["userType"] = usrType[user_temp.type]
         else:
-            temp["name"] = userTemp
-            temp["company"] = userTemp
-            temp["type"] = userTemp
-        del temp["processedmeat"]
-        del temp["rawmeat"]
+            temp["userName"] = user_temp
+            temp["company"] = user_temp
+            temp["userType"] = user_temp
+
+        del temp["deepAgingInfo"]
         result.append(temp)
-    varified_id = varified
-    if varified == 2:
-        varified = "승인"
-    elif varified == 1:
-        varified = "반려"
+
+    if status_type == 2:
+        status_type = "승인"
+    elif status_type == 1:
+        status_type = "반려"
     else:
-        varified = "대기중"
+        status_type = "대기중"
+    db_session.close()
     return (
         jsonify(
             {
                 "DB Total len": db_total_len,
-                f"{varified}": result,
+                f"{status_type}": result,
             }
         ),
         200,
@@ -894,12 +1063,8 @@ def _getTexanomyData(db_session):
     species_all = db_session.query(SpeciesInfo).all()
     result = {}
     for species in species_all:
-        # Use joinedload to avoid N+1 problem
         categories = (
-            db_session.query(CategoryInfo)
-            .options(joinedload(CategoryInfo.meats))
-            .filter_by(speciesId=species.id)
-            .all()
+            db_session.query(CategoryInfo).filter_by(speciesId=species.id).all()
         )
         category_dict = {}
         for category in categories:
@@ -909,6 +1074,7 @@ def _getTexanomyData(db_session):
                 category_dict[category.primalValue].append(category.secondaryValue)
 
         result[species.value] = category_dict
+    db_session.close()
     return jsonify(result), 200
 
 
@@ -934,31 +1100,36 @@ def get_AI_SensoryEval(db_session, id, seqno):
         ai_sensoryEval_history["createdAt"] = convert2string(
             ai_sensoryEval_history["createdAt"], 1
         )
+        db_session.close()
         return ai_sensoryEval_history
     else:
+        db_session.close()
         return None
 
 
 def _updateConfirmData(db_session, id):
     meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
-    if meat:
+    if meat and meat.statusType != 2:
         meat.statusType = 2
         db_session.merge(meat)
         db_session.commit()
-        return jsonify(id), 200
+        return jsonify({"msg": "Success to update StatusType"}), 200
     else:
-        return jsonify({"msg": "No Data In Meat DB"}), 404
+        db_session.rollback()
+        return jsonify({"msg": "No Data In Meat DB or Already Confirmed"}), 404
 
 
 def _updateRejectData(db_session, id):
     meat = db_session.query(Meat).get(id)  # DB에 있는 육류 정보
-    if meat:
+    if meat and meat.statusType != 1:
         meat.statusType = 1
+        meat.updatedAt = datetime.now()
         db_session.merge(meat)
         db_session.commit()
-        return jsonify(id), 200
+        return jsonify({"msg": "Success to update StatusType"}), 200
     else:
-        return jsonify({"msg": "No Data In Meat DB"}), 404
+        db_session.rollback()
+        return jsonify({"msg": "No Data In Meat DB or Already Rejected"}), 404
 
 
 def _addSpecificPredictData(db_session, data):
@@ -1003,11 +1174,9 @@ def _addSpecificPredictData(db_session, data):
         db_session.commit()
     except Exception as e:
         db_session.rollback()
-        raise e
+        raise Exception(str(e))
     # Return the new data
     return jsonify(data), 200
-    # 의문점1 : 이거 시간 오바 안 뜨려나?
-    # 의문점2 : 로딩창 안 뜨나
 
 
 def create_AI_SensoryEval(db_session, meat_data: dict, seqno: int, id: str):
@@ -1054,74 +1223,68 @@ def create_AI_SensoryEval(db_session, meat_data: dict, seqno: int, id: str):
 
 def _deleteSpecificMeatData(db_session, s3_conn, id):
     # 1. 육류 DB 체크
-    meat = db_session.query(Meat).filter_by(id=id).one()
+    meat = db_session.query(Meat).get(id)
     if meat is None:
-        return jsonify({"msg": f"No meat data found with the given ID: {id}"}), 404
+        return {"msg": f"Meat Data {id} Does Not Exist", "code": 400}
     try:
-        sensory_evals = db_session.query(SensoryEval).filter_by(id=id).all()
-        heatedmeat_evals = (
-            db_session.query(HeatedmeatSensoryEval).filter_by(id=id).all()
+        sensory_eval_image_list = s3_conn.get_files_with_id("sensory_evals", id)
+        heatedmeat_sensory_eval = s3_conn.get_files_with_id(
+            "heatedmeat_sensory_evals", id
         )
-        probexpt_datas = db_session.query(ProbexptData).filter_by(id=id).all()
-        # 가열육 데이터 삭제
-        for heatedmeat_eval in heatedmeat_evals:
-            seqno = heatedmeat_eval.seqno
-            db_session.delete(heatedmeat_eval)
-            s3_conn.delete_image("heatedmeat_sensory_evals", f"{id}-{seqno}")
-
-        # 실험 데이터 삭제
-        for probexpt_data in probexpt_datas:
-            db_session.delete(probexpt_data)
-
-        # 관능 데이터 삭제 및 관능 이미지 삭제
-        for sensory_eval in sensory_evals:
-            seqno = sensory_eval.seqno
-            db_session.delete(sensory_eval)
-            s3_conn.delete_image("sensory_evals", f"{id}-{seqno}")
 
         # 육류 데이터 삭제
         db_session.delete(meat)
         db_session.commit()
 
-        # 큐알 삭제
-        s3_conn.delete_image("qr_codes", f"{id}")
-        db_session.commit()
-        return jsonify({"delete Id": id}), 200
+        # 원육 QR 이미지 삭제
+        s3_conn.delete_image("qr_codes", f"{id}.png")
+
+        # 처리육 관능 이미지 삭제
+        for sensory_image in sensory_eval_image_list:
+            s3_conn.delete_image("sensory_evals", sensory_image)
+
+        # 가열육 관능 이미지 삭제
+        for heatedmeat_image in heatedmeat_sensory_eval:
+            s3_conn.delete_image("heatedmeat_sensory_evals", heatedmeat_image)
+
+        return {"msg": f"Success to Delete Meat {id}", "code": 200}
     except Exception as e:
         db_session.rollback()
-        raise e
+        return {"msg": f"Fail to Delete Meat: {str(e)}", "code": 400}
+
+
+def deleteMeatByIDList(db_session, s3_conn, id_list: list):
+    success_list = []
+    fail_list = []
+
+    for meat_id in id_list:
+        result = _deleteSpecificMeatData(db_session, s3_conn, meat_id)
+        if result["code"] == 200:
+            success_list.append(meat_id)
+        else:
+            fail_list.append(meat_id)
+
+    return success_list, fail_list
 
 
 def _deleteSpecificDeepAgingData(db_session, s3_conn, id, seqno):
     # 1. 육류 DB 체크
     meat = db_session.query(Meat).get(id)
+    deep_aging_info = get_DeepAging(db_session, id, seqno)
 
-    if meat is None:
-        return jsonify({"msg": f"No meat data found with the given ID: {id}"}), 404
+    if not (meat and deep_aging_info):
+        return {
+            "msg": f"No Meat or Deep Aging data found with the given ID and Seqno: {id}, {seqno}",
+            "code": 400,
+        }
     try:
-        sensory_evals = (
-            db_session.query(SensoryEval).filter_by(id=id, seqno=seqno).all()
-        )
-        heatedmeat_evals = (
-            db_session.query(HeatedmeatSensoryEval).filter_by(id=id, seqno=seqno).all()
-        )
-        probexpt_datas = (
-            db_session.query(ProbexptData).filter_by(id=id, seqno=seqno).all()
-        )
+        s3_conn.delete_image("heatedmeat_sensory_evals", f"{id}-{seqno}.png")
+        s3_conn.delete_image("sensory_evals", f"{id}-{seqno}.png")
 
-        for heatedmeat_eval in heatedmeat_evals:
-            db_session.delete(heatedmeat_eval)
-            s3_conn.delete_image("heatedmeat_sensory_evals", f"{id}-{seqno}")
-
-        for probexpt_data in probexpt_datas:
-            db_session.delete(probexpt_data)
-
-        for sensory_eval in sensory_evals:
-            db_session.delete(sensory_eval)
-            s3_conn.delete_image("sensory_evals", f"{id}-{seqno}")
+        db_session.delete(deep_aging_info)
 
         db_session.commit()
-        return jsonify({"delete Id": id, "delete Seqno": seqno}), 200
+        return {"msg": f"{id}-{seqno} Deep Aging Data Has Been Deleted", "code": 200}
     except Exception as e:
         db_session.rollback()
         return e
@@ -1131,95 +1294,125 @@ def get_num_of_processed_raw(db_session, start, end):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
-
-    # Subquery to find meats which have processed data
-    processed_meats_subquery = (
-        db_session.query(Meat.id)
-        .join(SensoryEval)
-        .filter(SensoryEval.seqno > 0)
-        .subquery()
-    )
-    processed_meats_select = processed_meats_subquery.select()
-
-    # 1. Category.specieId가 0이면서 SensoryEval.seqno 값이 0인 데이터, 1인 데이터
-    fresh_cattle_count = (
-        Meat.query.join(CategoryInfo)
-        .filter(
-            CategoryInfo.speciesId == 0,
-            ~Meat.id.in_(processed_meats_select),
-            Meat.createdAt.between(start, end),
-            Meat.statusType == 2,
+    
+    try:
+        processed_meats_subquery = (
+            db_session.query(DeepAgingInfo.id)
+            .filter(DeepAgingInfo.seqno > 0)
+            .group_by(DeepAgingInfo.id)
+            .subquery()
         )
-        .count()
-    )
-    processed_cattle_count = (
-        Meat.query.join(CategoryInfo)
-        .filter(
-            CategoryInfo.speciesId == 0,
-            Meat.id.in_(processed_meats_select),
-            Meat.createdAt.between(start, end),
-            Meat.statusType == 2,
+        processed_meats_select = processed_meats_subquery.select()
+
+        # 1. Category.specieId가 0이면서 DeepAgingInfo.seqno 값이 0인 데이터, 1 이상인 데이터
+        fresh_cattle_count = (
+            db_session.query(Meat)
+            .join(CategoryInfo, Meat.categoryId == CategoryInfo.id)
+            .filter(
+                CategoryInfo.speciesId == 0,
+                ~Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2
+            )
+            .count()
         )
-        .count()
-    )
 
-    # 2. Category.specieId가 1이면서 SensoryEval.seqno 값이 0인 데이터, 1인 데이터
-    fresh_pig_count = (
-        Meat.query.join(CategoryInfo)
-        .filter(
-            CategoryInfo.speciesId == 1,
-            ~Meat.id.in_(processed_meats_select),
-            Meat.createdAt.between(start, end),
-            Meat.statusType == 2,
+        processed_cattle_count = (
+            db_session.query(Meat)
+            .join(CategoryInfo, Meat.categoryId == CategoryInfo.id)
+            .filter(
+                CategoryInfo.speciesId == 0,
+                Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2
+            )
+            .count()
         )
-        .count()
-    )
-    processed_pig_count = (
-        Meat.query.join(CategoryInfo)
-        .filter(
-            CategoryInfo.speciesId == 1,
-            Meat.id.in_(processed_meats_select),
-            Meat.createdAt.between(start, end),
-            Meat.statusType == 2,
+
+        # 2. Category.specieId가 1이면서 DeepAgingInfo.seqno 값이 0인 데이터, 1 이상인 데이터
+        fresh_pig_count = (
+            db_session.query(Meat)
+            .join(CategoryInfo, Meat.categoryId == CategoryInfo.id)
+            .filter(
+                CategoryInfo.speciesId == 1,
+                ~Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .count()
         )
-        .count()
-    )
+        
+        processed_pig_count = (
+            db_session.query(Meat)
+            .join(CategoryInfo, Meat.categoryId == CategoryInfo.id)
+            .filter(
+                CategoryInfo.speciesId == 1,
+                Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .count()
+        )
 
-    # 3. 전체 데이터에서 SensoryEval.seqno 값이 0인 데이터, 1인 데이터
-    fresh_meat_count = Meat.query.filter(
-        ~Meat.id.in_(processed_meats_select),
-        Meat.createdAt.between(start, end),
-        Meat.statusType == 2,
-    ).count()
+        # 3. 전체 데이터에서 DeepAgingInfo.seqno 값이 0인 데이터, 1 이상인 데이터
+        fresh_meat_count = (
+            db_session.query(Meat)
+            .filter(
+                ~Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .count()
+        )
+        # 3. 전체 데이터에서 DeepAgingInfo.seqno 값이 0인 데이터, 1 이상인 데이터
+        fresh_meat_count = (
+            db_session.query(Meat)
+            .filter(
+                ~Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .count()
+        )
 
-    processed_meat_count = Meat.query.filter(
-        Meat.id.in_(processed_meats_select),
-        Meat.createdAt.between(start, end),
-        Meat.statusType == 2,
-    ).count()
+        processed_meat_count = (
+            db_session.query(Meat)
+            .filter(
+                Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .count()
+        )
+        processed_meat_count = (
+            db_session.query(Meat)
+            .filter(
+                Meat.id.in_(processed_meats_select),
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .count()
+        )
 
-    # Returning the counts in JSON format
-    return (
-        jsonify(
-            {
-                "cattle_counts": {
-                    "raw": fresh_cattle_count,
-                    "processed": processed_cattle_count,
-                },
-                "pig_counts": {
-                    "raw": fresh_pig_count,
-                    "processed": processed_pig_count,
-                },
-                "total_counts": {
-                    "raw": fresh_meat_count,
-                    "processed": processed_meat_count,
-                },
+        # Returning the counts in JSON format
+        return ({
+            "cattle_counts": {
+                "raw": fresh_cattle_count,
+                "processed": processed_cattle_count,
+            },
+            "pig_counts": {
+                "raw": fresh_pig_count,
+                "processed": processed_pig_count,
+            },
+            "total_counts": {
+                "raw": fresh_meat_count,
+                "processed": processed_meat_count,
             }
-        ),
-        200,
-    )
+        })
+
+    except Exception as e:
+        db_session.close()
+        raise Exception("Something Wrong with DB" + str(e))
 
 
 def get_num_of_cattle_pig(db_session, start, end):
@@ -1247,6 +1440,7 @@ def get_num_of_cattle_pig(db_session, start, end):
         )
         .count()
     )
+    db_session.close()
     return jsonify({"cattle_count": cow_count, "pig_count": pig_count}), 200
 
 
@@ -1254,597 +1448,493 @@ def get_num_of_primal_part(db_session, start, end):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    print(start, end)
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
-    # 1. Category.specieId가 0일때 해당 Category.primalValue 별로 육류의 개수를 추출
-    count_by_primal_value_beef = (
-        db_session.query(CategoryInfo.primalValue, func.count(Meat.id))
-        .join(Meat, Meat.categoryId == CategoryInfo.id)
-        .filter(
-            CategoryInfo.speciesId == 0,
-            Meat.createdAt.between(start, end),
-            Meat.statusType == 2,
-        )
-        .group_by(CategoryInfo.primalValue)
-        .all()
-    )
-    # logger.info(f'소의 부위별 고기 개수: {count_by_primal_value_beef}')
 
-    # 2. Category.specieId가 1일때 해당 Category.primalValue 별로 육류의 개수를 추출
-    count_by_primal_value_pork = (
-        db_session.query(CategoryInfo.primalValue, func.count(Meat.id))
-        .join(Meat, Meat.categoryId == CategoryInfo.id)
-        .filter(
-            CategoryInfo.speciesId == 1,
-            Meat.createdAt.between(start, end),
-            Meat.statusType == 2,
+    try:
+        # 1. Category.specieId가 0일때 해당 Category.primalValue 별로 육류의 개수를 추출
+        cow_count = (
+            db_session.query((func.count(Meat.id)).label('counts'), CategoryInfo.primalValue)
+            .join(CategoryInfo, Meat.categoryId == CategoryInfo.id)
+            .filter(
+                CategoryInfo.speciesId == 0,
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .group_by(CategoryInfo.primalValue)
+            .all()
         )
-        .group_by(CategoryInfo.primalValue)
-        .all()
-    )
+        beef = {f"{count.primalValue}": count.counts for count in cow_count}
+        # logger.info(f'소의 부위별 고기 개수: {count_by_primal_value_beef}')
 
-    # Returning the counts in JSON format
-    return (
-        jsonify(
-            {
-                "beef_counts_by_primal_value": dict(count_by_primal_value_beef),
-                "pork_counts_by_primal_value": dict(count_by_primal_value_pork),
-            }
-        ),
-        200,
-    )
+        # 2. Category.specieId가 1일때 해당 Category.primalValue 별로 육류의 개수를 추출
+        pig_count = (
+            db_session.query((func.count(Meat.id)).label('counts'), CategoryInfo.primalValue)
+            .join(CategoryInfo, Meat.categoryId == CategoryInfo.id)
+            .filter(
+                CategoryInfo.speciesId == 1,
+                Meat.createdAt.between(start, end),
+                Meat.statusType == 2,
+            )
+            .group_by(CategoryInfo.primalValue)
+            .all()
+        )
+        pork = {f"{count.primalValue}": count.counts for count in pig_count}
+        # logger.info(f'돼지의 부위별 고기 개수: {count_by_primal_value_port')
+
+        db_session.close()
+        # Returning the counts in JSON format
+        return ({
+            "beef_counts_by_primal_value": beef,
+            "pork_counts_by_primal_value": pork,
+        })
+    
+    except Exception as e:
+        db_session.close()
+        raise Exception("Something Wrong with DB" + str(e))
 
 
 def get_num_by_farmAddr(db_session, start, end):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
-    regions = [
-        "강원",
-        "경기",
-        "경남",
-        "경북",
-        "광주",
-        "대구",
-        "대전",
-        "부산",
-        "서울",
-        "세종",
-        "울산",
-        "인천",
-        "전남",
-        "전북",
-        "제주",
-        "충남",
-        "충북",
-    ]
-    result = {}
-
-    for speciesId in [0, 1]:  # 0 for cattle, 1 for pig
-        region_counts = {}
-        for region in regions:
-            region_like = "%".join(list(region))
-            count = (
+    
+    try:
+        result = {}
+        for speciesId in [0, 1, 2]:  # 0 for cattle, 1 for pig
+            query = (
                 db_session.query(Meat)
                 .join(CategoryInfo, CategoryInfo.id == Meat.categoryId)
                 .filter(
-                    CategoryInfo.speciesId == speciesId,
-                    Meat.farmAddr.like(f"%{region_like}%"),
                     Meat.createdAt.between(start, end),
                     Meat.statusType == 2,
                 )
-                .count()
             )
-            region_counts[region] = count
-        if speciesId == 0:
-            result["cattle_counts_by_region"] = region_counts
-        else:
-            result["pig_counts_by_region"] = region_counts
+            if speciesId != 2:
+                query = query.filter(CategoryInfo.speciesId == speciesId)
 
-    # For total data
-    total_region_counts = {}
-    for region in regions:
-        count = (
-            db_session.query(Meat)
-            .filter(
-                Meat.farmAddr.like(f"%{region}%"),
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .count()
-        )
-        total_region_counts[region] = count
-    result["total_counts_by_region"] = total_region_counts
-
-    return jsonify(result), 200
+            region_counts = {}
+            for region in regions:
+                count = query.filter(Meat.farmAddr.like(f"{region}%")).count()
+                region_counts[region] = count
+                
+            if speciesId == 0:
+                result["cattle_counts_by_region"] = region_counts
+            elif speciesId == 1:
+                result["pig_counts_by_region"] = region_counts
+            else:
+                result["total_counts_by_region"] = region_counts
+        db_session.close()
+        return result
+    
+    except Exception as e:
+        db_session.close()
+        raise Exception("Something Wrong with DB" + str(e))
 
 
-def get_probexpt_of_rawmeat(db_session, start, end):
+def get_probexpt_of_meat(db_session, start, end, specie_id, grade, is_raw):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
-    # 각 필드의 평균값, 최대값, 최소값 계산
+    
+    # 각 필드의 평균값, 최대값, 최소값 계산 - 프론트에서 처리
     stats = {}
     for field in ["sourness", "bitterness", "umami", "richness"]:
-        avg = (
-            db_session.query(func.avg(getattr(ProbexptData, field)))
-            .join(Meat, Meat.id == ProbexptData.id)
-            .filter(
-                ProbexptData.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .scalar()
-        )
-        max_value = (
-            db_session.query(func.max(getattr(ProbexptData, field)))
-            .join(Meat, Meat.id == ProbexptData.id)
-            .filter(
-                ProbexptData.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .scalar()
-        )
-        min_value = (
-            db_session.query(func.min(getattr(ProbexptData, field)))
-            .join(Meat, Meat.id == ProbexptData.id)
-            .filter(
-                ProbexptData.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .scalar()
-        )
-
         # 실제로 존재하는 값들 찾기
-        unique_values_query = (
+        value_query = (
             db_session.query(getattr(ProbexptData, field))
-            .join(Meat, Meat.id == ProbexptData.id)
+            .join(DeepAgingInfo, DeepAgingInfo.id == ProbexptData.id and DeepAgingInfo.seqno == ProbexptData.seqno)
+            .join(Meat, Meat.id == DeepAgingInfo.id)
+            .join(CategoryInfo, CategoryInfo.id == Meat.categoryId)
             .filter(
-                ProbexptData.seqno == 0,
+                ProbexptData.isHeated == False,
+                CategoryInfo.speciesId == specie_id,
+                ProbexptData.isHeated == False,
+                CategoryInfo.speciesId == specie_id,
                 Meat.createdAt.between(start, end),
                 Meat.statusType == 2,
             )
-            .distinct()
         )
-        unique_values = [value[0] for value in unique_values_query.all()]
+        
+        value_query = (
+                value_query.filter(
+                    ProbexptData.seqno == 0,
+                ) 
+                if is_raw 
+                else value_query.filter(
+                    ProbexptData.seqno != 0,
+                )
+            )
+        
+        value_query = value_query.filter(Meat.gradeNum == grade) if grade < 5 else value_query
+        
+        values = [value[0] for value in value_query.all()]
 
         stats[field] = {
-            "avg": avg,
-            "max": max_value,
-            "min": min_value,
-            "unique_values": unique_values,
+            "values": values,
         }
+    db_session.close()
+    return stats
 
-    return jsonify(stats)
+
+# def get_probexpt_of_processedmeat(db_session, seqno, start, end):
+#     # 기간 설정
+#     start = convert2datetime(start, 0)  # Start Time
+#     end = convert2datetime(end, 0)  # End Time
+#     if start is None or end is None:
+#         return jsonify({"msg": "Wrong start or end data"}), 404
+
+#     # 각 필드의 평균값, 최대값, 최소값 계산
+#     stats = {}
+#     seqno = safe_int(seqno)
+#     if seqno:
+#         for field in ["sourness", "bitterness", "umami", "richness"]:
+#             avg = (
+#                 db_session.query(func.avg(getattr(ProbexptData, field)))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             max_value = (
+#                 db_session.query(func.max(getattr(ProbexptData, field)))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             min_value = (
+#                 db_session.query(func.min(getattr(ProbexptData, field)))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+
+#             # 실제로 존재하는 값들 찾기
+#             unique_values_query = (
+#                 db_session.query(getattr(ProbexptData, field))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .distinct()
+#             )
+#             unique_values = [value[0] for value in unique_values_query.all()]
+
+#             stats[field] = {
+#                 "avg": avg,
+#                 "max": max_value,
+#                 "min": min_value,
+#                 "unique_values": unique_values,
+#             }
+#     else:
+#         for field in ["sourness", "bitterness", "umami", "richness"]:
+#             avg = (
+#                 db_session.query(func.avg(getattr(ProbexptData, field)))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             max_value = (
+#                 db_session.query(func.max(getattr(ProbexptData, field)))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             min_value = (
+#                 db_session.query(func.min(getattr(ProbexptData, field)))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+
+#             # 실제로 존재하는 값들 찾기
+#             unique_values_query = (
+#                 db_session.query(getattr(ProbexptData, field))
+#                 .join(Meat, Meat.id == ProbexptData.id)
+#                 .filter(
+#                     ProbexptData.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .distinct()
+#             )
+#             unique_values = [value[0] for value in unique_values_query.all()]
+
+#             stats[field] = {
+#                 "avg": avg,
+#                 "max": max_value,
+#                 "min": min_value,
+#                 "unique_values": unique_values,
+#             }
+
+#     return jsonify(stats)
 
 
-def get_probexpt_of_processedmeat(db_session, seqno, start, end):
+def get_sensory_of_meat(db_session, start, end, species, grade, is_raw):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
 
-    # 각 필드의 평균값, 최대값, 최소값 계산
-    stats = {}
-    seqno = safe_int(seqno)
-    if seqno:
-        for field in ["sourness", "bitterness", "umami", "richness"]:
-            avg = (
-                db_session.query(func.avg(getattr(ProbexptData, field)))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            max_value = (
-                db_session.query(func.max(getattr(ProbexptData, field)))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            min_value = (
-                db_session.query(func.min(getattr(ProbexptData, field)))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-
-            # 실제로 존재하는 값들 찾기
-            unique_values_query = (
-                db_session.query(getattr(ProbexptData, field))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .distinct()
-            )
-            unique_values = [value[0] for value in unique_values_query.all()]
-
-            stats[field] = {
-                "avg": avg,
-                "max": max_value,
-                "min": min_value,
-                "unique_values": unique_values,
-            }
-    else:
-        for field in ["sourness", "bitterness", "umami", "richness"]:
-            avg = (
-                db_session.query(func.avg(getattr(ProbexptData, field)))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            max_value = (
-                db_session.query(func.max(getattr(ProbexptData, field)))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            min_value = (
-                db_session.query(func.min(getattr(ProbexptData, field)))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-
-            # 실제로 존재하는 값들 찾기
-            unique_values_query = (
-                db_session.query(getattr(ProbexptData, field))
-                .join(Meat, Meat.id == ProbexptData.id)
-                .filter(
-                    ProbexptData.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .distinct()
-            )
-            unique_values = [value[0] for value in unique_values_query.all()]
-
-            stats[field] = {
-                "avg": avg,
-                "max": max_value,
-                "min": min_value,
-                "unique_values": unique_values,
-            }
-
-    return jsonify(stats)
-
-
-def get_sensory_of_rawmeat(db_session, start, end):
-    # 기간 설정
-    start = convert2datetime(start, 0)  # Start Time
-    end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
-
-    # 각 필드의 평균값, 최대값, 최소값 계산
-    stats = {}
-    for field in ["marbling", "color", "texture", "surfaceMoisture", "overall"]:
-        avg = (
-            db_session.query(func.avg(getattr(SensoryEval, field)))
-            .join(Meat, Meat.id == SensoryEval.id)
-            .filter(
-                SensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .scalar()
-        )
-        max_value = (
-            db_session.query(func.max(getattr(SensoryEval, field)))
-            .join(Meat, Meat.id == SensoryEval.id)
-            .filter(
-                SensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .scalar()
-        )
-        min_value = (
-            db_session.query(func.min(getattr(SensoryEval, field)))
-            .join(Meat, Meat.id == SensoryEval.id)
-            .filter(
-                SensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .scalar()
-        )
-
-        # 실제로 존재하는 값들 찾기
-        unique_values_query = (
-            db_session.query(getattr(SensoryEval, field))
-            .join(Meat, Meat.id == SensoryEval.id)
-            .filter(
-                SensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .distinct()
-        )
-        unique_values = [value[0] for value in unique_values_query.all()]
-
-        stats[field] = {
-            "avg": avg,
-            "max": max_value,
-            "min": min_value,
-            "unique_values": sorted(unique_values),
-        }
-
-    return jsonify(stats)
-
-
-def get_sensory_of_processedmeat(db_session, seqno, start, end):
-    # 기간 설정
-    start = convert2datetime(start, 0)  # Start Time
-    end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
-
-    stats = {}
-    seqno = safe_int(seqno)
-    if seqno:
-        # 각 필드의 평균값, 최대값, 최소값 계산
+    try:
+        # 각 필드의 평균값, 최대값, 최소값 계산 - 프론트에서 처리
+        stats = {}
         for field in ["marbling", "color", "texture", "surfaceMoisture", "overall"]:
-            avg = (
-                db_session.query(func.avg(getattr(SensoryEval, field)))
-                .join(Meat, Meat.id == SensoryEval.id)
-                .filter(
-                    SensoryEval.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            max_value = (
-                db_session.query(func.max(getattr(SensoryEval, field)))
-                .join(Meat, Meat.id == SensoryEval.id)
-                .filter(
-                    SensoryEval.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            min_value = (
-                db_session.query(func.min(getattr(SensoryEval, field)))
-                .join(Meat, Meat.id == SensoryEval.id)
-                .filter(
-                    SensoryEval.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-
             # 실제로 존재하는 값들 찾기
-            unique_values_query = (
+            value_query = (
                 db_session.query(getattr(SensoryEval, field))
-                .join(Meat, Meat.id == SensoryEval.id)
+                .join(DeepAgingInfo, DeepAgingInfo.id == SensoryEval.id and DeepAgingInfo.seqno == SensoryEval.seqno)
+                .join(Meat, Meat.id == DeepAgingInfo.id)
+                .join(CategoryInfo, CategoryInfo.id == Meat.categoryId)
                 .filter(
-                    SensoryEval.seqno == seqno,
-                    Meat.createdAt.between(start, end),
+                    CategoryInfo.speciesId == species,
                     Meat.statusType == 2,
+                    Meat.createdAt.between(start, end),
                 )
-                .distinct()
             )
-            unique_values = [
-                value[0] for value in unique_values_query.all() if value[0] is not None
-            ]
-
-            stats[field] = {
-                "avg": avg,
-                "max": max_value,
-                "min": min_value,
-                "unique_values": (
-                    sorted(unique_values) if unique_values else unique_values
-                ),
-            }
-    else:
-        # 각 필드의 평균값, 최대값, 최소값 계산
-        for field in ["marbling", "color", "texture", "surfaceMoisture", "overall"]:
-            avg = (
-                db_session.query(func.avg(getattr(SensoryEval, field)))
-                .join(Meat, Meat.id == SensoryEval.id)
-                .filter(
+            value_query = (
+                value_query.filter(
+                    SensoryEval.seqno == 0,
+                )
+                if is_raw
+                else value_query.filter(
                     SensoryEval.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
                 )
-                .scalar()
             )
-            max_value = (
-                db_session.query(func.max(getattr(SensoryEval, field)))
-                .join(Meat, Meat.id == SensoryEval.id)
-                .filter(
-                    SensoryEval.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
+            value_query = (
+                value_query.filter(Meat.gradeNum == grade)
+                if grade < 5 else value_query
             )
-            min_value = (
-                db_session.query(func.min(getattr(SensoryEval, field)))
-                .join(Meat, Meat.id == SensoryEval.id)
-                .filter(
-                    SensoryEval.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
+            values = [value[0] for value in value_query.all() if value[0] is not None]
 
-            # 실제로 존재하는 값들 찾기
-            unique_values_query = (
-                db_session.query(getattr(SensoryEval, field))
-                .join(Meat, Meat.id == SensoryEval.id)
-                .filter(
-                    SensoryEval.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .distinct()
-            )
-            unique_values = [
-                value[0] for value in unique_values_query.all() if value[0] is not None
-            ]
-
-            stats[field] = {
-                "avg": avg,
-                "max": max_value,
-                "min": min_value,
-                "unique_values": sorted(unique_values),
-            }
-
-    return jsonify(stats)
+            if values:
+                stats[field] = {
+                    "values": sorted(values),
+                }
+            else:
+                stats[field] = {
+                    "values": [],
+                }
+        db_session.close()
+        return stats
+    except Exception as e:
+        db_session.close()
+        raise Exception("Something Wrong with DB" + str(e))
 
 
-def get_sensory_of_raw_heatedmeat(db_session, start, end):
+# def get_sensory_of_processedmeat(db_session, seqno, start, end):
+#     # 기간 설정
+#     start = convert2datetime(start, 0)  # Start Time
+#     end = convert2datetime(end, 0)  # End Time
+#     if start is None or end is None:
+#         return jsonify({"msg": "Wrong start or end data"}), 404
+
+#     stats = {}
+#     seqno = safe_int(seqno)
+#     if seqno:
+#         # 각 필드의 평균값, 최대값, 최소값 계산
+#         for field in ["marbling", "color", "texture", "surfaceMoisture", "overall"]:
+#             avg = (
+#                 db_session.query(func.avg(getattr(SensoryEval, field)))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             max_value = (
+#                 db_session.query(func.max(getattr(SensoryEval, field)))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             min_value = (
+#                 db_session.query(func.min(getattr(SensoryEval, field)))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+
+#             # 실제로 존재하는 값들 찾기
+#             unique_values_query = (
+#                 db_session.query(getattr(SensoryEval, field))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno == seqno,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .distinct()
+#             )
+#             unique_values = [
+#                 value[0] for value in unique_values_query.all() if value[0] is not None
+#             ]
+
+#             stats[field] = {
+#                 "avg": avg,
+#                 "max": max_value,
+#                 "min": min_value,
+#                 "unique_values": (
+#                     sorted(unique_values) if unique_values else unique_values
+#                 ),
+#             }
+#     else:
+#         # 각 필드의 평균값, 최대값, 최소값 계산
+#         for field in ["marbling", "color", "texture", "surfaceMoisture", "overall"]:
+#             avg = (
+#                 db_session.query(func.avg(getattr(SensoryEval, field)))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             max_value = (
+#                 db_session.query(func.max(getattr(SensoryEval, field)))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+#             min_value = (
+#                 db_session.query(func.min(getattr(SensoryEval, field)))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .scalar()
+#             )
+
+#             # 실제로 존재하는 값들 찾기
+#             unique_values_query = (
+#                 db_session.query(getattr(SensoryEval, field))
+#                 .join(Meat, Meat.id == SensoryEval.id)
+#                 .filter(
+#                     SensoryEval.seqno != 0,
+#                     Meat.createdAt.between(start, end),
+#                     Meat.statusType == 2,
+#                 )
+#                 .distinct()
+#             )
+#             unique_values = [
+#                 value[0] for value in unique_values_query.all() if value[0] is not None
+#             ]
+
+#             stats[field] = {
+#                 "avg": avg,
+#                 "max": max_value,
+#                 "min": min_value,
+#                 "unique_values": sorted(unique_values),
+#             }
+
+#     return jsonify(stats)
+
+
+def get_sensory_of_raw_heatedmeat(db_session, start, end, species, grade, is_raw):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
 
-    # 각 필드의 평균값, 최대값, 최소값 계산
-    stats = {}
-    for field in ["flavor", "juiciness", "tenderness", "umami", "palability"]:
-        avg = (
-            db_session.query(func.avg(getattr(HeatedmeatSensoryEval, field)))
-            .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-            .filter(
-                HeatedmeatSensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
+    try:
+        # 각 필드의 평균값, 최대값, 최소값 계산 - 프론트에서 처리
+        stats = {}
+        for field in ["flavor", "juiciness", "tenderness", "umami", "palatability"]:
+            # 실제로 존재하는 값들 찾기
+            value_query = (
+                db_session.query(getattr(HeatedmeatSensoryEval, field))
+                .join(DeepAgingInfo, DeepAgingInfo.id == HeatedmeatSensoryEval.id and DeepAgingInfo.seqno == HeatedmeatSensoryEval.seqno)
+                .join(Meat, Meat.id == DeepAgingInfo.id)
+                .join(CategoryInfo, CategoryInfo.id == Meat.categoryId)
+                .filter(
+                    CategoryInfo.speciesId == species,
+                    Meat.statusType == 2,
+                    Meat.createdAt.between(start, end),
+                )
             )
-            .scalar()
-        )
-        max_value = (
-            db_session.query(func.max(getattr(HeatedmeatSensoryEval, field)))
-            .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-            .filter(
-                HeatedmeatSensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
+            value_query = (
+                value_query.filter(
+                    HeatedmeatSensoryEval.seqno == 0,
+                )
+                if is_raw
+                else value_query.filter(
+                    HeatedmeatSensoryEval.seqno != 0,
+                )
             )
-            .scalar()
-        )
-        min_value = (
-            db_session.query(func.min(getattr(HeatedmeatSensoryEval, field)))
-            .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-            .filter(
-                HeatedmeatSensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
+            value_query = (
+                value_query.filter(Meat.gradeNum == grade)
+                if grade < 5 else value_query
             )
-            .scalar()
-        )
+            if field == "tenderness":
+                values = [value[0]["0"] for value in value_query.all() if value[0] is not None]
+            else:
+                values = [value[0] for value in value_query.all() if value[0] is not None]
 
-        # 실제로 존재하는 값들 찾기
-        unique_values_query = (
-            db_session.query(getattr(HeatedmeatSensoryEval, field))
-            .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-            .filter(
-                HeatedmeatSensoryEval.seqno == 0,
-                Meat.createdAt.between(start, end),
-                Meat.statusType == 2,
-            )
-            .distinct()
-        )
-        unique_values = [
-            value[0] for value in unique_values_query.all() if value[0] is not None
-        ]
-
-        stats[field] = {
-            "avg": avg,
-            "max": max_value,
-            "min": min_value,
-            "unique_values": sorted(unique_values),
-        }
-
-    return jsonify(stats)
+            if values:
+                stats[field] = {
+                    "values": sorted(values),
+                }
+            else:
+                stats[field] = {
+                    "values": [],
+                }
+        db_session.close()
+        return stats
+    except Exception as e:
+        db_session.close()
+        raise Exception("Something Wrong with DB" + str(e))
 
 
 def get_sensory_of_processed_heatedmeat(db_session, seqno, start, end):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
 
-    # 각 필드의 평균값, 최대값, 최소값 계산
+    # 각 필드의 평균값, 최대값, 최소값 계산 - 프론트에서 처리
     stats = {}
     seqno = safe_int(seqno)
     if seqno:
         for field in ["flavor", "juiciness", "tenderness", "umami", "palability"]:
-            avg = (
-                db_session.query(func.avg(getattr(HeatedmeatSensoryEval, field)))
-                .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-                .filter(
-                    HeatedmeatSensoryEval.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            max_value = (
-                db_session.query(func.max(getattr(HeatedmeatSensoryEval, field)))
-                .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-                .filter(
-                    HeatedmeatSensoryEval.seqno == seqno,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            min_value = (
-                db_session.query(
-                    func.min(
-                        getattr(HeatedmeatSensoryEval, field),
-                        Meat.createdAt.between(start, end),
-                        Meat.statusType == 2,
-                    )
-                )
-                .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-                .filter(HeatedmeatSensoryEval.seqno == seqno)
-                .scalar()
-            )
-
             # 실제로 존재하는 값들 찾기
-            unique_values_query = (
+            value_query = (
                 db_session.query(getattr(HeatedmeatSensoryEval, field))
                 .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
                 .filter(
@@ -1852,53 +1942,18 @@ def get_sensory_of_processed_heatedmeat(db_session, seqno, start, end):
                     Meat.createdAt.between(start, end),
                     Meat.statusType == 2,
                 )
-                .distinct()
             )
-            unique_values = [
-                value[0] for value in unique_values_query.all() if value[0] is not None
+            values = [
+                value[0] for value in value_query.all() if value[0] is not None
             ]
 
             stats[field] = {
-                "avg": avg,
-                "max": max_value,
-                "min": min_value,
-                "unique_values": sorted(unique_values),
+                "values": sorted(values),
             }
     else:
         for field in ["flavor", "juiciness", "tenderness", "umami", "palability"]:
-            avg = (
-                db_session.query(func.avg(getattr(HeatedmeatSensoryEval, field)))
-                .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-                .filter(
-                    HeatedmeatSensoryEval.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            max_value = (
-                db_session.query(func.max(getattr(HeatedmeatSensoryEval, field)))
-                .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-                .filter(
-                    HeatedmeatSensoryEval.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-            min_value = (
-                db_session.query(func.min(getattr(HeatedmeatSensoryEval, field)))
-                .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
-                .filter(
-                    HeatedmeatSensoryEval.seqno != 0,
-                    Meat.createdAt.between(start, end),
-                    Meat.statusType == 2,
-                )
-                .scalar()
-            )
-
             # 실제로 존재하는 값들 찾기
-            unique_values_query = (
+            value_query = (
                 db_session.query(getattr(HeatedmeatSensoryEval, field))
                 .join(Meat, Meat.id == HeatedmeatSensoryEval.id)
                 .filter(
@@ -1906,19 +1961,15 @@ def get_sensory_of_processed_heatedmeat(db_session, seqno, start, end):
                     Meat.createdAt.between(start, end),
                     Meat.statusType == 2,
                 )
-                .distinct()
             )
-            unique_values = [
-                value[0] for value in unique_values_query.all() if value[0] is not None
+            values = [
+                value[0] for value in value_query.all() if value[0] is not None
             ]
 
             stats[field] = {
-                "avg": avg,
-                "max": max_value,
-                "min": min_value,
-                "unique_values": sorted(unique_values),
+                "values": sorted(values),
             }
-
+    db_session.close()
     return jsonify(stats)
 
 
@@ -1926,8 +1977,6 @@ def get_probexpt_of_processed_heatedmeat(db_session, start, end):
     # 기간 설정
     start = convert2datetime(start, 0)  # Start Time
     end = convert2datetime(end, 0)  # End Time
-    if start is None or end is None:
-        return jsonify({"msg": "Wrong start or end data"}), 404
 
     # Get all SensoryEval records
     sensory_evals = (
@@ -1988,5 +2037,33 @@ def get_probexpt_of_processed_heatedmeat(db_session, start, end):
         result[accumulated_minutes[sensory_eval.id]][
             f"({sensory_eval.id},{sensory_eval.seqno})"
         ] = probexpt_data_dict
-
+    db_session.close()
     return result
+
+
+def get_timeseries_of_cattle_data(db_session, start, end, meat_value, seqno):
+    # 기간 설정
+    start = convert2datetime(start, 0)  # Start Time
+    end = convert2datetime(end, 0)  # End Time
+    meat_ids = db_session.query(CategoryInfo.id).filter(CategoryInfo.primalValue == meat_value)
+    meat_id_list = [val[0] for val in meat_ids]
+    
+    stats = {}
+    for i, num in enumerate(["0", "3", "7", "14", "21"]):
+        query = (
+            db_session.query(func.avg(HeatedmeatSensoryEval.tenderness[num].astext.cast(Float)))
+            .join(DeepAgingInfo, (DeepAgingInfo.id == HeatedmeatSensoryEval.id) and (DeepAgingInfo.seqno == HeatedmeatSensoryEval.seqno))
+            .join(Meat, Meat.id == DeepAgingInfo.id)
+            .join(CategoryInfo, CategoryInfo.id == Meat.categoryId)
+            .filter(
+                HeatedmeatSensoryEval.seqno == seqno,
+                Meat.categoryId.in_(meat_id_list),
+                Meat.statusType == 2,
+                Meat.createdAt.between(start, end)
+            )
+        )
+        query = query.all()
+        stats[i] = query[0][0] if query[0][0] is not None else 0
+
+    db_session.close()
+    return stats

@@ -8,11 +8,19 @@ import 'package:structure/components/custom_app_bar.dart';
 import 'package:structure/components/main_input_field.dart';
 import 'package:structure/viewModel/sign_in/password_reset_view_model.dart';
 
-class PasswordResetScreen extends StatelessWidget {
+class PasswordResetScreen extends StatefulWidget {
   const PasswordResetScreen({super.key});
 
   @override
+  State<PasswordResetScreen> createState() => _PasswordResetScreenState();
+}
+
+class _PasswordResetScreenState extends State<PasswordResetScreen> {
+  @override
   Widget build(BuildContext context) {
+    PasswordResetViewModel passwordResetViewModel =
+        context.watch<PasswordResetViewModel>();
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: const CustomAppBar(
@@ -23,12 +31,12 @@ class PasswordResetScreen extends StatelessWidget {
             onTap: () => FocusScope.of(context).unfocus(),
             child: SingleChildScrollView(
               child: Form(
-                key: context.read<PasswordResetViewModel>().formKey,
+                key: passwordResetViewModel.formKey,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const Row(),
                     SizedBox(height: 72.h),
+
                     // 이메일
                     Container(
                         margin: EdgeInsets.only(left: 40.w),
@@ -40,22 +48,19 @@ class PasswordResetScreen extends StatelessWidget {
                     MainInputField(
                       mode: 1,
                       width: 640.w,
-                      formKey: context.read<PasswordResetViewModel>().formKey,
-                      controller: context.read<PasswordResetViewModel>().email,
-                      validateFunc: (value) => context
-                          .read<PasswordResetViewModel>()
-                          .emailValidate(value),
+                      formKey: passwordResetViewModel.formKey,
+                      controller: passwordResetViewModel.email,
+                      validateFunc: (value) =>
+                          passwordResetViewModel.emailValidate(value),
                     ),
                     SizedBox(height: 820.h),
 
                     // 재설정 버튼
                     MainButton(
-                      onPressed:
-                          context.read<PasswordResetViewModel>().isValid()
-                              ? () async => context
-                                  .read<PasswordResetViewModel>()
-                                  .sendResetPassword(context)
-                              : null,
+                      onPressed: passwordResetViewModel.isValid()
+                          ? () async =>
+                              passwordResetViewModel.sendResetPassword(context)
+                          : null,
                       text: '비밀번호 재설정',
                       width: 658.w,
                       height: 96.h,
@@ -66,10 +71,8 @@ class PasswordResetScreen extends StatelessWidget {
               ),
             ),
           ),
-          context.watch<PasswordResetViewModel>().isLoading
-              ? const Center(
-                  child: LoadingScreen(),
-                )
+          passwordResetViewModel.isLoading
+              ? const Center(child: LoadingScreen())
               : Container(),
         ],
       ),
