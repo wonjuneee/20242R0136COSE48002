@@ -2,6 +2,7 @@ from flask import Blueprint, current_app, jsonify, request
 import logging
 from datetime import datetime
 import pprint
+import time
 
 from opencv_utils import *
 from db.db_controller import *
@@ -86,6 +87,9 @@ def create_meat_opencv_info_for_model():
 # 예측 실행 (예측 관능 평가, 예측 등급)
 @predict_api.route("/sensory-eval", methods=["POST"])
 def predict_sensory_eval():
+    # 처리 시작 시간 기록
+    start_time = time.time()
+    
     try:
         db_session = current_app.db_session
         s3_conn = current_app.s3_conn
@@ -119,4 +123,11 @@ def predict_sensory_eval():
                 {"msg": "Server Error", "time": datetime.now().strftime("%H:%M:%S")}
             ),
             500,
-        ) 
+        )
+    finally:
+        # 처리 완료 시간 기록 및 경과 시간 계산
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(
+            f"API '/sensory-eval' 처리 시간: {elapsed_time:.2f}초"
+        )

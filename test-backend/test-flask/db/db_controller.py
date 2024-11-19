@@ -2261,8 +2261,9 @@ def process_opencv_image_for_learning(db_session, s3_conn, meat_id, seqno):
 def process_predict_sensory_eval(db_session, s3_conn, meat_id, seqno):
     try:
         # 단면 이미지 도출
-        # segment_img = s3_conn.get_object(bucket="section_images", object_key=f"section_images/{meat_id}-{seqno}.png")        
-        segment_img_object = extract_section_image(f"sensory_evals/{meat_id}-{seqno}.png", meat_id, seqno)
+        # segment_img_object = s3_conn.get_object(s3_conn.bucket, f"section_images/{meat_id}-{seqno}.png")
+        segment_img_object = f"section_images/{meat_id}-{seqno}.png"
+        # segment_img_object = extract_section_image(f"sensory_evals/{meat_id}-{seqno}.png", meat_id, seqno)
 
         ai_sensory_data = {}
         

@@ -1,5 +1,8 @@
 import os
 import pprint
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from flask import jsonify
 import numpy as np
@@ -18,9 +21,12 @@ from torchvision.transforms import InterpolationMode
 
 import mlflow
 import mlflow.pytorch
+from mlflow.tracking import MlflowClient
 
 import io
 import gc
+
+load_dotenv()  
 
 from IPython.core.interactiveshell import InteractiveShell
 InteractiveShell.ast_node_interactivity = "all"
@@ -63,15 +69,17 @@ def load_local_model(model_path):
             raise FileNotFoundError(f"Model path does not exist: {model_path}")
 
         # GPU 사용 가능 여부 확인
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # 현재 CPU만 사용 가능하므로 명시적으로 설정
+        device = torch.device("cpu")
 
         # 모델 로드
         model = torch.load(model_path, map_location=device)
         
         # 메모리 정리
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # if torch.cuda.is_available():
+        #     torch.cuda.empty_cache()
 
         return model
 
@@ -79,10 +87,68 @@ def load_local_model(model_path):
         print(f"Error loading model: {e}")
         return None
 
+# def load_model(model_name):
+#     try:
+#         # MLflow 연결 설정
+#         mlflow.set_tracking_uri("http://localhost:5000")
+#         client = MlflowClient()
+        
+#         # 모델 URI 생성
+#         model_uri = f"models:/{model_name}/latest"
+        
+#         print(f"Attempting to load model '{model_name}' from MLflow...")
+        
+#         # 환경변수로 타임아웃 설정
+#         import os
+#         os.environ['MLFLOW_HTTP_REQUEST_TIMEOUT'] = '300'
+        
+#         model = mlflow.pytorch.load_model(model_uri=model_uri)
+#         print(f"Successfully loaded model '{model_name}' from MLflow!")
+#         return model
+        
+#     except mlflow.exceptions.MlflowException as e:
+#         print(f"MLflow specific error: {e}")
+#         return None
+#     except Exception as e:
+#         print(f"Error in loading model: {e}")
+#         return None
+
+
+def load_model(model_name, cache_dir="model_cache"):
+    # 캐시 디렉토리 생성
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(exist_ok=True)
+    
+    # 캐시된 모델 경로
+    cached_model_path = cache_dir / f"{model_name}_latest"
+    
+    try:
+        # 캐시된 모델이 있는지 확인
+        if cached_model_path.exists():
+            print(f"Loading cached model from {cached_model_path}")
+            model = mlflow.pytorch.load_model(str(cached_model_path))
+            return model
+            
+        # 캐시된 모델이 없으면 MLflow에서 다운로드
+        print(f"Downloading model {model_name} from MLflow...")
+        mlflow.set_tracking_uri(f"http://{os.getenv('SERVER_API')}:5000")
+        model_uri = f"models:/{model_name}/latest"
+        
+        # 모델을 캐시 디렉토리에 저장
+        model = mlflow.pytorch.load_model(model_uri)
+        mlflow.pytorch.save_model(model, str(cached_model_path))
+        
+        print(f"Model cached at {cached_model_path}")
+        return model
+        
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None
+
 
 ## ---------------- 단면 도출 ---------------- ##
 torch.backends.cudnn.enabled = False
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class MeatDataset(Dataset):
     def __init__(self, root_dir, transform=None):
@@ -157,8 +223,12 @@ def extract_section_image(s3_image_object, meat_id, seqno):
     transform = SegmentationTransform(output_size=(448, 448))
     
     # 사전 학습된 모델 로드
-    model_location = "/home/ubuntu/mlflow/segmentation_model/data/model.pth"
-    model = load_local_model(model_location)
+    model_name = "segmentation"
+    # model = load_model(model_name)
+    model_path = "/home/ubuntu/mlflow/segmentation_model/data/model.pth"
+    model = load_local_model(model_path)
+    device = torch.device("cpu")
+    model = model.to(device)
     
     model.eval()
     s3_bucket = os.getenv("S3_BUCKET_NAME")
@@ -186,7 +256,7 @@ def extract_section_image(s3_image_object, meat_id, seqno):
     img_tensor = img_tensor.to(device)
     
     # 모델에 입력
-    with autocast():
+    with torch.no_grad():
         output = model(img_tensor)
     
     # 마스크 생성 (U-Net 출력을 이진 마스크로 변환)
@@ -344,11 +414,11 @@ def create_texture_info(image):
 
     # 텍스처 특징 추출
     texture_result = {
-        "contrast" : graycoprops(glcm, 'contrast')[0][0],
-        "dissimilarity" : graycoprops(glcm, 'dissimilarity')[0][0],
-        "homogeneity" : graycoprops(glcm, 'homogeneity')[0][0],
-        "energy" : graycoprops(glcm, 'energy')[0][0],
-        "correlation" : graycoprops(glcm, 'correlation')[0][0]
+        "contrast" : float(graycoprops(glcm, 'contrast')[0][0]),
+        "dissimilarity" : float(graycoprops(glcm, 'dissimilarity')[0][0]),
+        "homogeneity" : float(graycoprops(glcm, 'homogeneity')[0][0]),
+        "energy" : float(graycoprops(glcm, 'energy')[0][0]),
+        "correlation" : float(graycoprops(glcm, 'correlation')[0][0])
         }
     
     return texture_result
