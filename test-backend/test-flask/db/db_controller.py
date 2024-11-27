@@ -4,12 +4,12 @@ import requests
 import uuid
 from sqlalchemy import func
 import json
-from utils import *
+from utils.utils import *
 import pprint
 
 from .db_model import *
-from opencv_utils import *
-from ml_utils import *
+from utils.opencv_utils import *
+from utils.ml_utils import *
 
 db = SQLAlchemy()
 logging.basicConfig(level=logging.INFO)

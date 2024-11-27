@@ -17,7 +17,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, scoped_session, sessionmaker, validates
 
-from utils import *
+from utils.utils import *
 
 Base = declarative_base()
 

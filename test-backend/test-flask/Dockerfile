@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Flask 애플리케이션 파일 저장 경로
 WORKDIR /admin_server
-COPY ./test-flask /admin_server
+COPY . /admin_server
 
 # Python 패키지 설치
 WORKDIR /admin_server
