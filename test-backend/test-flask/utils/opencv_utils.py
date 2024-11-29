@@ -1,27 +1,22 @@
 import os
-import pprint
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from flask import jsonify
 import numpy as np
 import boto3
 
 import cv2
 from PIL import Image
-from skimage.segmentation import slic
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
-from torch.cuda.amp import autocast
-from torchvision.transforms import InterpolationMode
+import onnxruntime
 
 import mlflow
 import mlflow.pytorch
-from mlflow.tracking import MlflowClient
 
 import io
 import gc
@@ -146,6 +141,15 @@ def load_model(model_name, cache_dir="model_cache"):
         return None
 
 
+# U-Net -> onnx로 최적화한 모델 로드
+def load_and_infer_onnx(onnx_path, image_tensor):
+    session = onnxruntime.InferenceSession(onnx_path)
+    input_name = session.get_inputs()[0].name
+    output_name = session.get_outputs()[0].name
+    output = session.run([output_name], {input_name: image_tensor.numpy()})
+    return output
+
+
 ## ---------------- 단면 도출 ---------------- ##
 torch.backends.cudnn.enabled = False
 # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -214,35 +218,28 @@ class SegmentationTransform:
         return image, mask
 
 
-def apply_mask(image, mask):
-    return image * mask.to(device)
-
-
+# onnx 모델로 단면 이미지 도출
 def extract_section_image(s3_image_object, meat_id, seqno):
+    device = torch.device("cpu")
+    # ONNX 모델 경로
+    onnx_path = "/home/ubuntu/mlflow/unet_model.onnx"
+    
     # 데이터셋 및 DataLoader 설정
     transform = SegmentationTransform(output_size=(448, 448))
     
-    # 사전 학습된 모델 로드
-    model_name = "segmentation"
-    # model = load_model(model_name)
-    model_path = "/home/ubuntu/mlflow/segmentation_model/data/model.pth"
-    model = load_local_model(model_path)
-    device = torch.device("cpu")
-    model = model.to(device)
-    
-    model.eval()
+    # S3 버킷 및 클라이언트 설정
     s3_bucket = os.getenv("S3_BUCKET_NAME")
     
-    # S3에서 이미지 다운로드
     try:
         s3 = boto3.client(
-                service_name="s3",
-                region_name=os.getenv("S3_REGION_NAME"),
-                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            )
+            service_name="s3",
+            region_name=os.getenv("S3_REGION_NAME"),
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        )
         object_key = str(s3_image_object)
 
+        # S3에서 이미지 다운로드
         response = s3.get_object(Bucket=s3_bucket, Key=object_key)
         img = Image.open(io.BytesIO(response['Body'].read())).convert("RGB")
         print("Success to create Image Object")
@@ -253,19 +250,21 @@ def extract_section_image(s3_image_object, meat_id, seqno):
     img_tensor, _ = transform(img, Image.new('L', img.size))
     img_tensor = img_tensor.unsqueeze(0)
     
-    img_tensor = img_tensor.to(device)
-    
-    # 모델에 입력
-    with torch.no_grad():
-        output = model(img_tensor)
+    # ONNX 모델 추론
+    print("Starting inference with ONNX model...")
+    output = load_and_infer_onnx(onnx_path, img_tensor)
+    output = torch.tensor(output[0])  # ONNX 추론 결과를 PyTorch 텐서로 변환
     
     # 마스크 생성 (U-Net 출력을 이진 마스크로 변환)
-    mask = (output > 0.5).float().to(device)
+    mask = (output > 0.5).float()
+
+    def apply_mask(image, mask):
+        return image * mask.to(device)
     
     # 마스크 적용
-    masked_img = apply_mask(img_tensor, mask)
+    masked_img = apply_mask(img_tensor[0], mask[0])
     
-    # # 224x224로 center crop
+    # 224x224로 center crop
     crop = transforms.CenterCrop(224)
     cropped_img = crop(masked_img).squeeze(0)
     
@@ -286,7 +285,7 @@ def extract_section_image(s3_image_object, meat_id, seqno):
     s3.put_object(Bucket=s3_bucket, Key=output_key, Body=img_byte_arr, ContentType='image/png')
 
     print(f"Image processed and saved to S3 at {output_key}")
-    return output_key  ## section_images/asdf-1.png
+    return output_key  # e.g., section_images/asdf-1.png
 
 
 ## ---------------- 단백질, 지방 컬러팔레트 ---------------- ##
