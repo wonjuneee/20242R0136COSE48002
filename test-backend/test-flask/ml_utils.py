@@ -28,8 +28,11 @@ def predict_regression_sensory_eval(s3_conn, s3_image_object, meat_id, seqno):
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std),
     ])
-    model_location = "/home/ubuntu/mlflow/regression_model/data/model.pth"
-    model = load_local_model(model_location)
+    model_name = "regression"
+    model = load_model(model_name)
+    
+    device = torch.device("cpu")
+    model = model.to(device)
 
     model.eval()
 
@@ -85,8 +88,11 @@ def predict_classification_grade(s3_conn, s3_image_object, meat_id, seqno):
         transforms.Normalize(mean=mean, std=std),
     ])
 
-    model_location = "/home/ubuntu/mlflow/classification_model/data/model.pth"
-    model = load_local_model(model_location)
+    model_name = "classification"
+    model = load_model(model_name)
+    
+    device = torch.device("cpu")
+    model = model.to(device)
 
     model.eval()
 
@@ -222,12 +228,12 @@ def show_img2(img1, img2, alpha=0.8, ax=None):
 def visualize_all_attention_layers(s3_conn, image, s3_bucket_name, meat_id, seqno, xai_type):
     # model 호출
     if xai_type == 'sensory-xai':
-        model_location = "/home/ubuntu/mlflow/regression_model/data/model.pth"
+        model_name = "regression"
     else:
-        model_location = "/home/ubuntu/mlflow/classification_model/data/model.pth"
-    model = load_local_model(model_location)
+        model_name = "classification"
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_model(model_name)
+    device = torch.device("cpu")
     model = model.to(device)
     
     # attention map 생성

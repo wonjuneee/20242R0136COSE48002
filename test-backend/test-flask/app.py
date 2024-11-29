@@ -1,5 +1,6 @@
 # 서버 메인 파일
 import sys
+from datetime import timedelta
 
 from flask import Flask, current_app
 from flask_cors import CORS
@@ -22,6 +23,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 load_dotenv()  
 
 app = Flask(__name__)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # 5분
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=5)
 
 # RDS DB 연결
 db_uri = os.getenv("DB_URI")
