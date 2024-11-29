@@ -27,6 +27,8 @@ hooks:
   ApplicationStart:
     - location: scripts/register_flask_service.sh
       timeout: 600
+    - location: scripts/register_model_from_s3.sh
+      timeout: 600
     - location: scripts/start_user_count_service.sh
       timeout: 600
   ValidateService:

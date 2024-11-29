@@ -9,3 +9,4 @@ __pycache__/
 
 test-flask/log/*
 test-flask/images/*
+prometheus-grafana/prometheus/volume/*
