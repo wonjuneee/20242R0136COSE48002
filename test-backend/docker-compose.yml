@@ -9,8 +9,9 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
-    environment:
-      - FLASK_ENV=development
+    env_file:
+      - ./test-flask/.env
+      - ./test-flask/serviceAccountKey.json
 
   prometheus:
     image: prom/prometheus:latest
@@ -29,7 +30,7 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
